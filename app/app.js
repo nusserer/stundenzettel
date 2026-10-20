@@ -519,17 +519,31 @@ document.addEventListener("click",(ev)=>{ if(ev.target && ev.target.id==="btnIns
 /* ---------------- Programm-Updates (ausschließlich manuell) ---------------- */
 let updateRegistration = null;
 let updateReady = false;
+let installedVersion = null;
+let availableVersion = null;
 function setUpdateStatus(text){ const el=document.getElementById("updateStatus"); if(el) el.textContent=text; }
+function getWorkerVersion(worker){
+  return new Promise(resolve=>{
+    if(!worker) return resolve(null);
+    const channel=new MessageChannel();
+    const timeout=window.setTimeout(()=>resolve(null),1000);
+    channel.port1.onmessage=e=>{ window.clearTimeout(timeout); resolve(e.data && e.data.version || null); };
+    worker.postMessage({type:"get-version"},[channel.port2]);
+  });
+}
 function renderUpdateUI(){
   const row=document.getElementById("updateRow");
   if(!row) return;
   row.hidden=!(navigator.serviceWorker && (updateRegistration || navigator.serviceWorker.controller));
   const check=document.getElementById("btnCheckUpdate"), install=document.getElementById("btnInstallUpdate");
+  const version=document.getElementById("updateVersion");
+  if(version) version.textContent=`Installiert: ${installedVersion||"unbekannt"}${availableVersion?` · Verfügbar: ${availableVersion}`:""}`;
   if(check) check.disabled=false;
   if(install) install.hidden=!updateReady;
 }
-function markUpdateReady(){
+async function markUpdateReady(){
   updateReady=true;
+  availableVersion=await getWorkerVersion(updateRegistration && updateRegistration.waiting);
   setUpdateStatus("Ein Update wurde heruntergeladen und ist zur Installation bereit.");
   renderUpdateUI();
 }
@@ -549,14 +563,17 @@ async function initUpdateUI(){
   if(!("serviceWorker" in navigator) || location.protocol==="file:") return;
   try{
     const reg=await navigator.serviceWorker.getRegistration("sw.js");
-    if(reg) watchUpdateRegistration(reg);
+    if(reg){
+      installedVersion=await getWorkerVersion(reg.active || navigator.serviceWorker.controller);
+      watchUpdateRegistration(reg);
+    }
     navigator.serviceWorker.addEventListener("controllerchange",()=>location.reload());
   }catch(e){}
 }
 async function checkForUpdate(){
   const check=document.getElementById("btnCheckUpdate");
   if(check) check.disabled=true;
-  updateReady=false; renderUpdateUI();
+  updateReady=false; availableVersion=null; renderUpdateUI();
   setUpdateStatus("Prüfe auf Updates …");
   try{
     const reg=updateRegistration || await navigator.serviceWorker.getRegistration("sw.js");

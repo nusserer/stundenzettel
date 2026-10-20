@@ -1,5 +1,6 @@
 /* Offline-Zwischenspeicher für die installierte App. Nur über http://localhost oder https aktiv, nie bei file://. */
-const CACHE = "stundenzettel-v3-202610200356";
+const VERSION = "2026.10.20.2";
+const CACHE = `stundenzettel-v3-${VERSION}`;
 const FILES = [
  "./",
  "index.html",
@@ -24,5 +25,9 @@ self.addEventListener("fetch", e=>{
   e.respondWith(caches.match(e.request, {ignoreSearch:true}).then(r=>r || (e.request.mode==="navigate" ? caches.match("index.html") : Response.error())));
 });
 self.addEventListener("message", e=>{
+  if(e.data && e.data.type==="get-version" && e.ports[0]){
+    e.ports[0].postMessage({version:VERSION});
+    return;
+  }
   if(e.data && e.data.type==="activate-update") self.skipWaiting();
 });
