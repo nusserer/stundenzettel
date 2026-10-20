@@ -1,5 +1,5 @@
 /* Offline-Zwischenspeicher für die installierte App. Nur über http://localhost oder https aktiv, nie bei file://. */
-const VERSION = "2026.10.20.2";
+const VERSION = "2026.10.20.3";
 const CACHE = `stundenzettel-v3-${VERSION}`;
 const FILES = [
  "./",
@@ -15,9 +15,18 @@ const FILES = [
  "pwa/icon-512.png",
  "pwa/icon-maskable-512.png"
 ];
-self.addEventListener("install", e=>{ e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES))); });
-self.addEventListener("activate", e=>{ e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())); });
-// Programmdateien ausschließlich aus dem Cache: Netzabrufe erfolgen nur nach dem Klick auf „Auf Updates prüfen“.
+async function preCacheRelease(){
+  const cache=await caches.open(CACHE);
+  await Promise.all(FILES.map(async path=>{
+    const request=new Request(path,{cache:"reload"});
+    const response=await fetch(request);
+    if(!response.ok) throw new Error(`Programmdatei konnte nicht geladen werden: ${path}`);
+    await cache.put(request,response);
+  }));
+}
+self.addEventListener("install",()=>{});
+self.addEventListener("activate", e=>{ e.waitUntil(preCacheRelease().then(()=>caches.keys()).then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())); });
+// Programmdateien ausschließlich aus dem Cache. Erst „Update installieren“ lädt die neue Version ohne HTTP-Cache nach.
 self.addEventListener("fetch", e=>{
   if(e.request.method!=="GET") return;
   const url = new URL(e.request.url);
