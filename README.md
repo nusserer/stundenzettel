@@ -17,3 +17,7 @@ Offline-Zeiterfassung als installierbare Web-App. Diese Veröffentlichung enthä
 - Chrome oder Edge bieten automatisches Speichern in die gewählte Datei.
 - Firefox/Safari können die Datei nicht automatisch überschreiben.
 - Details stehen in der App unter Einstellungen.
+
+## Plan B: lokal installieren
+
+Falls die GitHub-Adresse im Firmennetz blockiert ist, lade den vollständigen Programmordner herunter und starte `Stundenzettel-installieren.cmd`. Der Starter nutzt Python, wenn verfügbar, sonst das mit Windows gelieferte PowerShell, und öffnet die App über `http://localhost:8765/`. In der App auf **Installieren** klicken. Der lokale Server ist nur für Installation oder Updates nötig; die Daten bleiben in der eigenen JSON-Datei.
