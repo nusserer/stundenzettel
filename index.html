@@ -1,0 +1,326 @@
+<!doctype html><html lang="de"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Stundenzettel</title><link rel="stylesheet" href="app/styles.css"><link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#20242a"><link rel="icon" href="pwa/icon-192.png"></head><body>
+
+<nav id="rail">
+  <div class="brand">
+    <div class="t">Stundenzettel</div>
+    <div class="y"><button type="button" id="railYearBtn" class="year-btn" aria-haspopup="listbox" aria-expanded="false" title="Jahr wechseln"><span id="railYear">–</span> <span class="caret">▾</span></button><div id="railYearMenu" class="year-menu" role="listbox" hidden></div></div>
+  </div>
+  <div class="tab active" data-view="heute"><span>Heute</span></div>
+  <div class="tab" data-view="monat"><span>Monat</span></div>
+  <div class="tab" data-view="jahr"><span>Jahresübersicht</span></div>
+  <div class="tab" data-view="auftraege"><span>Aufträge</span> <span class="dot" id="dotTask"></span></div>
+  <div class="tab" data-view="urlaub"><span>Urlaub &amp; Saldo</span></div>
+  <div class="tab" data-view="fahrtkosten"><span>Fahrtkosten</span></div>
+  <div class="tab" data-view="rechner"><span>Arbeitszeit-Rechner</span></div>
+  <div class="tab" data-view="einstellungen"><span>Einstellungen</span></div>
+  <div id="railFoot">
+    Speicherort: <span id="saveState">wird geladen</span><br>
+    <button id="btnReconnectHeader" class="secondary" style="display:none; width:100%; margin:6px 0 0; font-size:11.5px; padding:6px 8px;">Datei-Speicherung reaktivieren</button>
+    <span id="railClock"></span>
+    <button id="btnMiniPlayer" class="secondary" style="width:100%; margin-top:10px; margin-left:0; font-size:11.5px; padding:6px 8px;">🗗 Mini-Player öffnen</button>
+  </div>
+</nav>
+
+<div id="main">
+  <div id="yearOtherBanner" class="banner year-other" style="display:none;"></div>
+  <div id="yearLockBanner" class="banner" style="display:none;"></div>
+
+  <!-- HEUTE -->
+  <div class="view active" id="view-heute">
+    <h1>Heute</h1>
+    <div class="sub" id="heuteDatum"></div>
+
+    <div class="kpis" id="heuteKpis"></div>
+
+    <div class="panel">
+      <h2>Stempeln</h2>
+      <div id="heuteStempelForm"></div>
+      <div class="btnrow">
+        <button class="go" id="btnKommen">Kommt (jetzt)</button>
+        <button id="btnGehen">Geht (jetzt)</button>
+        <button id="btnFeierabend" title="Geht mit Nachlauf, pausiert den Auftrag, fragt nach Tab schließen">Feierabend</button>
+        <button class="secondary" id="btnPauseStart">Pause Start</button>
+        <button class="secondary" id="btnPauseStop">Pause Ende</button>
+      </div>
+      <p class="hint">Stempelungen erfolgen ausschließlich über die Schaltflächen oder durch manuelle Eingabe. Pausenwerte folgen der eingestellten Pausenregel (Einstellungen → Arbeitszeit). Bitte bei Bedarf manuell prüfen und anpassen.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Laufender Auftrag</h2>
+      <div id="heuteAuftrag"></div>
+      <h2 style="margin-top:18px;">Heute erfasst <small>Pausen &amp; Auftrags-Historie</small></h2>
+      <div id="heuteHistorie"></div>
+    </div>
+  </div>
+
+  <!-- MONAT -->
+  <div class="view" id="view-monat">
+    <h1>Monatsansicht</h1>
+    <div id="monatTabs" class="sheet-tabs"></div>
+    <div class="monat-layout">
+      <div class="monat-col-main">
+        <div id="monatLegend" class="code-legend"></div>
+        <div class="tablewrap">
+          <table id="monatTable">
+            <colgroup>
+              <col style="width:3.5%"><col style="width:6%"><col style="width:4%"><col style="width:8%">
+              <col style="width:20%">
+              <col style="width:6%"><col style="width:5%"><col style="width:2%">
+              <col style="width:9%"><col style="width:10%">
+              <col style="width:5.5%"><col style="width:5.5%"><col style="width:5.5%"><col style="width:5.5%">
+            </colgroup>
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="hint">Die Pause wird nach der Pausenregel berechnet (Einstellungen → Arbeitszeit), außer eine eigene Pausenzeit ist eingetragen. „!“ markiert eine gesetzlich zu kurze Pause. Ein komplett leerer Tag (keine Zeiten, kein Code) zählt nicht mit.</p>
+
+        <div class="panel" id="monatAbschluss"></div>
+        <div class="panel">
+          <h2>Monatsübersicht</h2>
+          <div class="kv-grid" id="monatKennzahlenTable"></div>
+        </div>
+        <div class="panel" id="zeitverteilungMonat"></div>
+      </div>
+
+      <div class="monat-col-side">
+        <div class="panel" id="gehtPanel">
+          <h2>Geht-Empfehlung heute <small id="gehtPanelSub"></small></h2>
+          <div id="gehtActive" style="margin-bottom:10px;"></div>
+          <div class="tablewrap" style="max-height:none;">
+            <table id="gehtTable"><thead><tr><th>Code</th><th>Bedeutung</th><th>Geht-Zeit</th></tr></thead><tbody></tbody></table>
+          </div>
+          <div class="grid cols2" style="margin-top:12px;">
+            <div><label>Freies Ziel Mo–Do (h)</label><input type="number" step="0.1" id="gFreeMoDo"></div>
+            <div><label>Freies Ziel Fr (h)</label><input type="number" step="0.1" id="gFreeFr"></div>
+            <div><label>Freitag-Anpassung Woche/WZ (h)</label><input type="number" step="0.5" id="gFriAdjust"></div>
+            <div><label>Wunsch-Geht-Zeit (heute)</label><input type="time" step="60" id="gWunschGeht"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Monatsverlauf <small>Gleitzeitsaldo je Tag über den Monat</small></h2>
+      <div class="chart-wrap"><svg id="monatChart" viewBox="0 0 1600 420" preserveAspectRatio="xMidYMid meet"></svg></div>
+    </div>
+  </div>
+
+  <!-- JAHR -->
+  <div class="view" id="view-jahr">
+    <h1>Jahresübersicht</h1>
+    <div id="jahrArchiveBanner" style="display:none; padding:6px 10px; background:#f6ece2; border:1px solid var(--amber); border-radius:var(--radius); font-size:12.5px; font-weight:600; margin-bottom:10px;"></div>
+    <div class="kpis" id="jahrKpis"></div>
+    <div class="panel">
+      <h2>Kalenderübersicht <small>Tag × Monat, wie im Original — Kürzel bzw. Punkt = gearbeiteter Tag</small></h2>
+      <div class="tablewrap" style="max-height:none;">
+        <table id="jahrKalender"><thead></thead><tbody></tbody></table>
+      </div>
+      <div class="hint" id="jahrLegende" style="margin-top:8px;"></div>
+    </div>
+    <div class="panel">
+      <h2>Saldoverlauf <small>Gleitzeitsaldo je Tag über das Jahr</small></h2>
+      <div class="chart-wrap"><svg id="jahrChart" viewBox="0 0 1080 290" preserveAspectRatio="xMidYMid meet"></svg></div>
+    </div>
+    <div class="panel">
+      <h2>Monatsübersicht</h2>
+      <div class="tablewrap" style="max-height:none;">
+        <table id="jahrTable"><thead></thead><tbody></tbody></table>
+      </div>
+    </div>
+    <div class="panel" id="zeitverteilungJahr"></div>
+  </div>
+
+  <!-- AUFTRÄGE -->
+  <div class="view" id="view-auftraege">
+    <h1>Aufträge</h1>
+    <div class="panel running-panel" id="runningTaskPanel"></div>
+    <dialog id="newStoerPanel" class="task-dialog">
+      <h2>Neue Störungsart</h2>
+      <label>Bezeichnung (z. B. „Störung Maschine“)</label><input id="stoerName">
+      <p class="hint">Den konkreten Grund (z. B. „IT-Probleme“) gibst du beim Beenden der Störung an.</p>
+      <div class="btnrow"><button id="btnStoerAdd">Anlegen</button><button id="btnStoerAddStart" class="go">▶ Anlegen &amp; stempeln</button><button id="btnStoerCancel" class="secondary">Abbrechen</button></div>
+    </dialog>
+    <dialog id="stoerEndDlg" class="task-dialog">
+      <h2 id="stoerEndTitle">Störung beendet</h2>
+      <label>Grund / Beschreibung (optional)</label><input id="stoerEndNote" list="stoerNoteList" placeholder="z. B. IT-Probleme"><datalist id="stoerNoteList"></datalist>
+      <div class="btnrow"><button id="stoerEndBack" class="go">▶ Zurück zum Auftrag</button><button id="stoerEndOnly" class="secondary">Nur beenden</button></div>
+    </dialog>
+    <dialog id="newTaskPanel" class="task-dialog">
+      <h2>Neuer Auftrag</h2>
+      <div class="grid cols2">
+        <div><label>Auftragsnummer</label><input id="taskOrderNr"></div>
+        <div><label>Modul</label><input id="taskModul"></div>
+        <div><label>Station</label><input id="taskStation"></div>
+        <div><label>Datum Bekanntgabe</label><input type="date" id="taskDatum"></div>
+      </div>
+      <div class="grid cols2" style="margin-top:8px;">
+        <div><label>Änderung / Beschreibung</label><input id="taskAenderung"></div>
+      </div>
+      <div class="btnrow"><button id="btnTaskAdd">Anlegen</button><button id="btnTaskAddStart" class="go">▶ Anlegen &amp; starten</button><button id="btnTaskCancel" class="secondary">Abbrechen</button></div>
+    </dialog>
+    <div class="panel">
+      <div class="sheet-tabs" id="taskKindTabs" style="margin-bottom:12px;"><div class="sheet-tab active" data-kind="auftrag">Aufträge</div><div class="sheet-tab" data-kind="stoerung">⚡ Störungen</div></div>
+      <h2 id="taskListTitle">Auftragsliste</h2>
+      <div class="grid cols3" style="margin-bottom:10px;align-items:end;">
+        <div><label>Suche (Nr., Modul, Station, Änderung)</label><input id="taskSearch" placeholder="z. B. Nummer oder Stichwort"></div>
+        <div><label>Status</label><select id="taskStatusFilter"><option value="open">Fertige ausblenden</option><option value="all">Alle Aufträge</option><option value="finished">Nur fertige</option></select></div>
+        <div><button id="btnNewTaskToggle" type="button">+ Neuer Auftrag</button></div>
+      </div>
+      <div class="tablewrap" style="max-height:50vh;">
+        <table id="taskTable"><colgroup></colgroup><thead></thead><tbody></tbody></table>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Zeit-Log <small>entspricht „Stempelzeiten“ · Zeiten mit Sekunden</small></h2>
+      <div class="grid cols3" style="margin-bottom:10px;">
+        <div><label>Log durchsuchen</label><input id="logSearch" placeholder="Auftrag, Änderung, Pause …"></div>
+        <div><label>Einträge</label><select id="logTypeFilter"><option value="all">Alle einschließlich Pausen</option><option value="tasks">Nur Auftragszeiten</option><option value="pauses">Nur Pausen</option><option value="auftraege">Nur Aufträge</option><option value="stoerungen">Nur Störungen</option></select></div>
+      </div>
+      <div class="tablewrap" style="max-height:40vh;">
+        <table id="logTable"><thead></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- URLAUB -->
+  <div class="view" id="view-urlaub">
+    <h1>Urlaub &amp; Gleitzeitsaldo</h1>
+    <div class="kpis" id="urlaubKpis"></div>
+    <div class="panel">
+      <h2>Urlaubskonto</h2>
+      <div class="grid cols3">
+        <div><label>Anspruch dieses Jahr (Tage)</label><input type="number" step="0.5" id="uAnspruch"></div>
+        <div><label>Übertrag aus Vorjahr (Tage)</label><input type="number" step="0.5" id="uUebertrag"><label class="chk"><input type="checkbox" id="uUebertragAuto"> automatisch aus Vorjahr</label></div>
+        <div><label>Resturlaub aus Vorjahr verfällt am</label><input type="date" id="uVerfall"></div>
+      </div>
+      <p class="hint" id="urlaubHint"></p>
+    </div>
+    <div class="panel">
+      <h2>Gleitzeit</h2>
+      <div class="grid cols3">
+        <div><label>Übertrag aus Vorjahr (Std.)</label><input type="number" step="0.01" id="glzUebertrag"><label class="chk"><input type="checkbox" id="glzUebertragAuto"> automatisch aus Vorjahr</label></div>
+        <div><label>Puffer für GLZ-Tage-Berechnung (Std.)</label><input type="number" step="0.5" id="glzPuffer"></div>
+        <div><label>SOLL für einen GLZ-Tag (Std.)</label><input type="number" step="0.1" id="glzTagSoll"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ARBEITSZEIT-RECHNER -->
+  <div class="view" id="view-rechner">
+    <h1>Arbeitszeit-Rechner</h1>
+    <p class="sub">Plane Arbeitsbeginn und -ende: Wann ist das SOLL erreicht, und wann ist spätestens Schluss?</p>
+    <div class="panel" id="rechnerBox"></div>
+  </div>
+
+  <!-- FAHRTKOSTEN -->
+  <div class="view" id="view-fahrtkosten">
+    <h1>Fahrtkostenberechnung</h1>
+    <div class="panel">
+      <div class="grid cols3">
+        <div><label>Entfernung km (einfach)</label><input type="number" step="0.1" id="fkDistanz"></div>
+        <div><label>€ pro km</label><input type="number" step="0.01" id="fkProKm"></div>
+        <div><label>KFZ-Fixkosten / Jahr (€)</label><input type="number" step="1" id="fkFix"></div>
+        <div><label>Verbrauch je 100 km (l)</label><input type="number" step="0.1" id="fkVerbrauch"></div>
+        <div><label>Preis je Liter (€)</label><input type="number" step="0.01" id="fkPreis"></div>
+      </div>
+    </div>
+    <div class="kpis" id="fkKpis"></div>
+    <div class="panel" id="excelTravelCheckpoint"></div>
+  </div>
+
+  <!-- EINSTELLUNGEN -->
+  <div class="view" id="view-einstellungen">
+    <h1>Einstellungen</h1>
+    <div class="sheet-tabs" id="setTabs">
+      <div class="sheet-tab active" data-sec="allgemein">Allgemein</div>
+      <div class="sheet-tab" data-sec="stempeln">Stempeln</div>
+      <div class="sheet-tab" data-sec="mini">Mini-Player &amp; Meldungen</div>
+      <div class="sheet-tab" data-sec="arbeitszeit">Arbeitszeit</div>
+      <div class="sheet-tab" data-sec="abwesenheit">Abwesenheits-Codes</div>
+      <div class="sheet-tab" data-sec="feiertage">Feiertage</div>
+      <div class="sheet-tab" data-sec="jahre">Jahre</div>
+      <div class="sheet-tab" data-sec="dateien">Dateien &amp; Sicherung</div>
+    </div>
+
+    <div class="panel set-section active" data-sec="allgemein">
+      <h2>Allgemein</h2>
+      <div class="set-row"><div class="set-label"><strong>Name</strong></div><div class="set-ctl"><input id="sName"></div></div>
+      <div class="set-row"><div class="set-label"><strong>Personal-Nummer</strong></div><div class="set-ctl"><input id="sPersNr"></div></div>
+      <div class="set-row" id="installRow" hidden><div class="set-label"><strong>Als App installieren</strong><small id="installStatus"></small></div><div class="set-ctl"><button id="btnInstallApp" hidden>Als App installieren</button></div></div>
+    </div>
+
+    <div class="panel set-section" data-sec="stempeln">
+      <h2>Stempeln</h2>
+      <div class="set-row"><div class="set-label"><strong>Automatische Auftragsstempelung beim Öffnen</strong><small>Kommt-Stempel, Start des letzten Auftrags und automatische Pausen. Gilt nur Mo–Fr und nur, wenn heute noch nichts gestempelt ist.</small></div>
+        <div class="set-ctl"><select id="sStempeln"><option value="ja">Ein</option><option value="nein">Aus</option></select></div></div>
+      <div class="set-row"><div class="set-label"><strong>Vorlauf beim automatischen Kommt</strong><small>Minuten früher, z. B. Weg von der Stempeluhr bis zum PC. Die Buttons „Kommt“ und „Geht“ stempeln immer exakt jetzt.</small></div>
+        <div class="set-ctl unit"><input type="number" step="1" id="sOffsetKommen"><span>Min.</span></div></div>
+      <div class="set-row"><div class="set-label"><strong>Nachlauf bei „Feierabend“</strong><small>Minuten später, nur für den Button „Feierabend“.</small></div>
+        <div class="set-ctl unit"><input type="number" step="1" id="sOffsetGehen"><span>Min.</span></div></div>
+    </div>
+
+    <div class="panel set-section" data-sec="mini">
+      <h2>Mini-Player &amp; Meldungen</h2>
+      <div class="set-row"><div class="set-label"><strong>Mini-Player beim Minimieren öffnen</strong><small>Öffnet sich nur, wenn kurz zuvor in der App geklickt wurde (Browser-Sicherheitsgrenze). Sonst hilft der Button unten links.</small></div>
+        <div class="set-ctl"><select id="sMiniAuto"><option value="ja">Ja</option><option value="nein">Nein</option></select></div></div>
+      <div class="set-row"><div class="set-label"><strong>Benachrichtigungen</strong><small>Pausen- und 10h-Warnungen blitzen den Mini-Player, spielen einen Ton und können zusätzlich als Desktop-Meldung erscheinen. Der Ton bleibt stumm, wenn lange nicht interagiert wurde.</small><div id="notifStatus" style="margin-top:8px;"></div></div>
+        <div class="set-ctl"><button class="secondary" id="btnNotifPermission">🔔 Browser-Benachrichtigungen erlauben</button><button class="secondary" id="btnNotifTest" hidden style="margin-top:8px;">Testmeldung senden</button></div></div>
+    </div>
+
+    <div class="panel set-section" data-sec="arbeitszeit">
+      <h2>Arbeitszeit</h2>
+      <div class="set-row stack"><div class="set-label"><strong>SOLL-Arbeitszeit pro Wochentag</strong><small>in Stunden</small></div>
+        <div class="set-ctl"><div class="grid cols4" id="sWeekly"></div></div></div>
+    </div>
+
+    <div class="panel set-section" data-sec="arbeitszeit">
+      <h2>Pausen &amp; Kernzeit</h2>
+      <div class="set-row stack"><div class="set-label"><strong>Je Tagesgruppe</strong><small>Pausenlänge, wenn keine eigene Pause eingetragen ist, und Kernzeit für die Geht-Empfehlung „K“.</small></div>
+        <div class="set-ctl"><table class="rules-table" id="rulesTable"></table></div></div>
+      <div class="set-row"><div class="set-label"><strong>Pause an Feiertagen</strong><small>Gilt anstelle der Tagesgruppe, wenn der Tag ein Feiertag ist.</small></div><div class="set-ctl unit"><input type="number" step="1" id="rPauseHoliday"><span>Min.</span></div></div>
+      <div class="set-row"><div class="set-label"><strong>Lange Pause ab Anwesenheit</strong><small>Ab dieser Netto-Zeit (Anwesenheit minus normale Pause) gilt die lange Pause.</small></div><div class="set-ctl unit"><input type="number" step="0.5" id="rLongHours"><span>h</span></div></div>
+      <div class="set-row"><div class="set-label"><strong>Länge der langen Pause</strong></div><div class="set-ctl unit"><input type="number" step="1" id="rLongPause"><span>Min.</span></div></div>
+      <div class="set-row"><div class="set-label"><strong>Spätestes Arbeitsende</strong><small>Begrenzt die 9h-/10h-Zeiten und -Warnungen.</small></div><div class="set-ctl"><input type="time" id="rLatestEnd"></div></div>
+      <div class="set-row stack"><div class="set-label"><strong>Feste Pausen</strong><small>Zu diesen Zeiten erinnert V3 und pausiert (bei aktivem automatischem Stempeln) den laufenden Auftrag.</small></div>
+        <div class="set-ctl" id="rBreaksEditor"></div></div>
+    </div>
+
+    <div class="panel set-section" data-sec="abwesenheit">
+      <h2>Abwesenheits-Codes</h2>
+      <div id="sCodes"></div>
+      <div class="btnrow"><button class="secondary" id="btnCodeAdd">+ Code hinzufügen</button></div>
+    </div>
+
+    <div class="panel set-section" data-sec="feiertage">
+      <h2>Feiertage <small id="feiertageJahr"></small></h2>
+      <div id="excelHolidayEditor"></div>
+      <p class="hint">Faktor: „frei“ = kein SOLL, „halber Tag“ = halbes SOLL (z. B. Heiligabend), „Arbeitstag“ = zählt normal.</p>
+    </div>
+
+    <div class="panel set-section" id="jahreswechselPanel" data-sec="jahre">
+      <h2>Jahre</h2>
+      <div class="set-row"><div class="set-label"><strong>Jahr anzeigen / bearbeiten</strong><small>Alle Jahre bleiben bearbeitbar. Gestempelt wird immer im Jahr des heutigen Datums.</small></div>
+        <div class="set-ctl"><select id="sArchiveYear"></select></div></div>
+      <div class="set-row"><div class="set-label"><strong>Jahr sperren</strong><small>Das angezeigte Jahr wird nur lesbar; jederzeit wieder entsperrbar.</small></div>
+        <div class="set-ctl"><label class="chk"><input type="checkbox" id="sYearLocked"> Gesperrt (nur Lesen)</label></div></div>
+      <div class="set-row"><div class="set-label"><strong>Neues Jahr</strong><small>Gleitzeitsaldo und Resturlaub werden live aus dem Vorjahr berechnet. Aufträge und Zeitprotokoll gelten für alle Jahre.</small></div>
+        <div class="set-ctl"><button id="btnJahreswechsel" class="warn">Neues Jahr hinzufügen…</button></div></div>
+    </div>
+
+    <div class="panel set-section" id="settingsFilesPanel" data-sec="dateien"><h2>Dateien &amp; Sicherung</h2><p class="hint">Deine Daten liegen ausschließlich in der gewählten JSON-Datei auf diesem Rechner. Der Browser merkt sich nur, welche Datei es ist.</p><div id="fsPanel"></div></div>
+  </div>
+
+
+</div>
+
+<div id="toast"></div>
+
+<input type="file" id="startFileInput" accept=".json,application/json" hidden>
+<dialog id="startDlg" class="task-dialog start-dlg"><div id="startBody"></div></dialog>
+
+<div id="modalOverlay">
+  <div class="modal-box" id="modalBox"></div>
+</div>
+
+<script src="app/time-core.js"></script><script src="app/day-pause.js"></script><script src="extensions/excel-parity/excel-parity.js"></script><script src="app/excel-checkpoints-view.js"></script><script src="app/app.js"></script><script>if("serviceWorker" in navigator && location.protocol!=="file:") navigator.serviceWorker.register("sw.js").catch(()=>{});</script></body></html>

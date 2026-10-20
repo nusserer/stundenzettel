@@ -1,0 +1,4 @@
+# Persönliche Zeitdaten gehören nicht in dieses Repository
+*.json
+!manifest.webmanifest
+*.xls*
