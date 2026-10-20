@@ -516,6 +516,71 @@ window.addEventListener("beforeinstallprompt",(e)=>{ e.preventDefault(); install
 window.addEventListener("appinstalled",()=>{ installEvt=null; toast("App installiert. Du kannst sie jetzt über das Startmenü oder chrome://apps öffnen."); updateInstallUI(); });
 document.addEventListener("click",(ev)=>{ if(ev.target && ev.target.id==="btnInstallApp") doInstallApp(); });
 
+/* ---------------- Programm-Updates (ausschließlich manuell) ---------------- */
+let updateRegistration = null;
+let updateReady = false;
+function setUpdateStatus(text){ const el=document.getElementById("updateStatus"); if(el) el.textContent=text; }
+function renderUpdateUI(){
+  const row=document.getElementById("updateRow");
+  if(!row) return;
+  row.hidden=!(navigator.serviceWorker && (updateRegistration || navigator.serviceWorker.controller));
+  const check=document.getElementById("btnCheckUpdate"), install=document.getElementById("btnInstallUpdate");
+  if(check) check.disabled=false;
+  if(install) install.hidden=!updateReady;
+}
+function markUpdateReady(){
+  updateReady=true;
+  setUpdateStatus("Ein Update wurde heruntergeladen und ist zur Installation bereit.");
+  renderUpdateUI();
+}
+function watchUpdateRegistration(reg){
+  updateRegistration=reg;
+  if(reg.waiting) markUpdateReady();
+  reg.addEventListener("updatefound",()=>{
+    const worker=reg.installing;
+    if(!worker) return;
+    worker.addEventListener("statechange",()=>{
+      if(worker.state==="installed" && navigator.serviceWorker.controller) markUpdateReady();
+    });
+  });
+  renderUpdateUI();
+}
+async function initUpdateUI(){
+  if(!("serviceWorker" in navigator) || location.protocol==="file:") return;
+  try{
+    const reg=await navigator.serviceWorker.getRegistration("sw.js");
+    if(reg) watchUpdateRegistration(reg);
+    navigator.serviceWorker.addEventListener("controllerchange",()=>location.reload());
+  }catch(e){}
+}
+async function checkForUpdate(){
+  const check=document.getElementById("btnCheckUpdate");
+  if(check) check.disabled=true;
+  updateReady=false; renderUpdateUI();
+  setUpdateStatus("Prüfe auf Updates …");
+  try{
+    const reg=updateRegistration || await navigator.serviceWorker.getRegistration("sw.js");
+    if(!reg){ setUpdateStatus("Die Update-Funktion ist noch nicht verfügbar. Bitte die App einmal neu öffnen."); return; }
+    watchUpdateRegistration(reg);
+    await reg.update();
+    if(reg.waiting) markUpdateReady();
+    else setUpdateStatus("Kein neues Update verfügbar.");
+  }catch(e){ setUpdateStatus("Update konnte nicht geprüft werden. Bitte Internetverbindung und GitHub-Adresse prüfen."); }
+  finally{ if(check) check.disabled=false; }
+}
+function installPendingUpdate(){
+  const worker=updateRegistration && updateRegistration.waiting;
+  if(!worker) return;
+  setUpdateStatus("Installiere Update …");
+  worker.postMessage({type:"activate-update"});
+}
+document.addEventListener("click",(ev)=>{
+  if(!ev.target) return;
+  if(ev.target.id==="btnCheckUpdate") checkForUpdate();
+  if(ev.target.id==="btnInstallUpdate") installPendingUpdate();
+});
+initUpdateUI();
+
 /* ---------------- Startbildschirm & Assistent ---------------- */
 function startMessage(text){ const el=document.getElementById("startMsg"); if(el){ el.textContent=text; el.hidden=!text; } }
 function closeStartDialog(){ const d=document.getElementById("startDlg"); if(d.open) d.close(); }
