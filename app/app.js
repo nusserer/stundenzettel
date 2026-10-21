@@ -7,6 +7,7 @@
 const WEEKDAY_KEYS = ["mo","di","mi","do","fr","sa","so"]; // Mon..Sun
 const WEEKDAY_LABELS = {mo:"Montag",di:"Dienstag",mi:"Mittwoch",do:"Donnerstag",fr:"Freitag",sa:"Samstag",so:"Sonntag"};
 const MONTH_NAMES = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+let closingAfterChoice = false;
 
 /* ---------------- Utilities ---------------- */
 function pad2(n){return String(n).padStart(2,"0");}
@@ -26,14 +27,14 @@ function isoWeekNumber(dateObj){
 function isFriSatSun(d){ const k=jsWeekdayKey(d); return k==="fr"||k==="sa"||k==="so"; }
 function timeToMin(t){ if(!t) return null; const [h,m]=t.split(":").map(Number); return h*60+m; }
 function minToTime(m){ if(m==null) return ""; m=Math.round(m); const h=Math.floor(m/60), mm=m%60; return pad2(h)+":"+pad2(mm); }
-function hoursToHM(h){
-  if(h==null || isNaN(h)) return "–";
-  const sign = h<0 ? "-" : "";
-  const abs = Math.abs(h);
-  const hh = Math.floor(abs);
-  const mm = Math.round((abs-hh)*60);
-  return sign+hh+":"+pad2(mm);
+function durationToMinutes(h){ return h==null || isNaN(h) ? null : Math.round(Number(h)*60); }
+function formatDurationHours(h){
+  const minutes=durationToMinutes(h), mode=state?.ui?.durationFormat || "decimal";
+  return window.StundenzettelTimeCore ? StundenzettelTimeCore.formatDuration(minutes,mode) : (minutes==null?"–":minToTime(minutes));
 }
+function hoursToHM(h){ return formatDurationHours(h); }
+function formatOffsetHM(minutes){ return StundenzettelTimeCore.formatDuration(Number(minutes)||0,"hm"); }
+function parseDurationInput(value){ return window.StundenzettelTimeCore ? StundenzettelTimeCore.parseDuration(value) : null; }
 function round2(x){ return Math.round(x*100)/100; }
 function todayKey(){ return dateKey(new Date()); }
 function nowTimeStr(){ const d=new Date(); return pad2(d.getHours())+":"+pad2(d.getMinutes()); }
@@ -177,6 +178,7 @@ function defaultSettings(year){
     glz: { carryOverHours: 0, bufferHours: 40, dayHours: 7.6 },
     travel: { distanceKm: 0, pricePerKm: 0.30, fixedPerYear: 0, consumptionPer100: 7, pricePerLiter: 1.7 },
     rules: defaultRules(),
+    pauseAlerts: {miniPlayer:true, browser:true},
     gehtEmpfehlung: {
       freeGoalMoDo: 8, freeGoalFr: 6, kernzeit: "14:15",
       friAdjustWeek: 2, friAdjustWZ: 2, activeCode: "WZF"
@@ -231,6 +233,7 @@ function normalizeState(s){
   s.settings.travel = Object.assign({}, def.travel, s.settings.travel||{});
   s.settings.gehtEmpfehlung = Object.assign({}, def.gehtEmpfehlung, s.settings.gehtEmpfehlung||{});
   s.settings.rules = mergeRules(s.settings.rules, s.settings.gehtEmpfehlung.kernzeit);
+  s.settings.pauseAlerts = Object.assign({}, def.pauseAlerts, s.settings.pauseAlerts||{});
   s.holidays = (s.holidays && s.holidays.length) ? s.holidays : computeHolidays(s.settings.year);
   s.days = s.days || {};
   // Migration: alte Tage mit festen k1/g1/k2/g2-Feldern (max. 2 Kommt/Geht-Paare) auf die
@@ -248,6 +251,8 @@ function normalizeState(s){
     }
   }
   s.tasks = s.tasks || []; s.log = s.log || [];
+  s.ui = s.ui || {};
+  if(!["decimal","hm"].includes(s.ui.durationFormat)) s.ui.durationFormat="decimal";
   // Ältere Stände speicherten Aufträge/Protokoll je Jahr im Archiv – sie werden jahresübergreifend zusammengeführt.
   Object.values(s.archive||{}).forEach(entry=>{
     if(Array.isArray(entry.tasks)){ entry.tasks.forEach(t=>{ if(!s.tasks.some(x=>x.id===t.id)) s.tasks.push(t); }); delete entry.tasks; }
@@ -268,7 +273,7 @@ function normalizeState(s){
   s.ui = s.ui || {};
   const defaultTaskColumnWidths = [42,36,130,100,100,220,105,104,92,96,72];
   s.ui.taskTableColumnWidths = s.ui.taskTableColumnWidths || defaultTaskColumnWidths;
-  // V3 vor Spalte „Angelegt am“: alte gespeicherte Breiten behalten und neue Breite gezielt einfügen.
+  // Stundenzettel vor Spalte „Angelegt am“: alte gespeicherte Breiten behalten und neue Breite gezielt einfügen.
   if(s.ui.taskTableColumnWidths.length===9) s.ui.taskTableColumnWidths.splice(6,0,104);
   if(s.ui.taskTableColumnWidths.length===10) s.ui.taskTableColumnWidths.splice(1,0,36);
   // Pin-Spalte von 74 auf 36 px verkleinern (Icon-only-Button).
@@ -290,7 +295,7 @@ let currentMonthIdx = new Date().getMonth(); // 0-11
 
 /* ---------------- Speichern ----------------
    Die gewählte JSON-Datei ist die einzige Datenquelle (File System Access API, Chrome/Edge).
-   - Beim Start wird nichts geschrieben; V3 liest nur die zuvor gewählte Datei (oder zeigt den Startbildschirm).
+   - Beim Start wird nichts geschrieben; Stundenzettel liest nur die zuvor gewählte Datei (oder zeigt den Startbildschirm).
    - Der Browser merkt sich nur die Dateiverknüpfung, keine Daten.
    - Nur wenn das Schreiben in die Datei scheitert, hält ein Notfall-Puffer im Browser den Stand fest;
      er wird beim nächsten Öffnen der Datei als Wiederherstellung angeboten. */
@@ -460,6 +465,7 @@ function adoptState(obj, handle, meta){
   currentMonthIdx = new Date().getMonth();
   const autoKommen = autoStampKommenOnOpen();
   const taskResumed = resumeLatestTaskOnOpen();
+  initAutoScheduler();
   switchView("heute");
   if(dirty || autoKommen || taskResumed) markDirty(); else markClean();
 }
@@ -468,7 +474,7 @@ async function openExistingFile(){
     try{
       const [handle] = await window.showOpenFilePicker({id:"stundenzettel-daten", startIn:"documents", types:PICKER_TYPES, multiple:false});
       const perm = await handle.requestPermission({mode:"readwrite"});
-      if(perm!=="granted"){ startMessage("Ohne Schreibberechtigung kann V3 nicht speichern. Bitte die Berechtigung erteilen."); return; }
+      if(perm!=="granted"){ startMessage("Ohne Schreibberechtigung kann Stundenzettel nicht speichern. Bitte die Berechtigung erteilen."); return; }
       await openFromHandle(handle);
     }catch(err){
       if(err && err.name==="AbortError") return;
@@ -605,7 +611,7 @@ function openStartDialog(storedHandle, message){
   const d=document.getElementById("startDlg"), body=document.getElementById("startBody");
   const reopen = storedHandle ? `<div class="start-card"><div><strong>Zuletzt verwendete Datei</strong><br><span class="hint">${escapeHtml(storedHandle.name||"")}</span></div><button id="btnStartReopen" class="go run-btn">Öffnen &amp; weitermachen</button></div>` : "";
   body.innerHTML=`<h2>Stundenzettel</h2>
-    <p class="hint">Deine Daten liegen in einer Datei auf diesem Rechner. Ohne Datei zeigt V3 nichts an und speichert nichts.</p>
+    <p class="hint">Deine Daten liegen in einer Datei auf diesem Rechner. Ohne Datei zeigt Stundenzettel nichts an und speichert nichts.</p>
     <p id="startMsg" class="start-msg" ${message?"":"hidden"}>${escapeHtml(message||"")}</p>
     ${reopen}
     <div class="start-card"><div><strong>Bestehende Datei öffnen</strong><br><span class="hint">Eine vorhandene Stundenzettel-JSON.</span></div><button id="btnStartOpen" class="${storedHandle?"secondary":""} run-btn">Datei öffnen…</button></div>
@@ -620,7 +626,7 @@ function openStartDialog(storedHandle, message){
   if(re) re.onclick=async()=>{
     try{
       const perm=await storedHandle.requestPermission({mode:"readwrite"});
-      if(perm!=="granted"){ startMessage("Berechtigung nicht erteilt – ohne sie kann V3 die Datei nicht öffnen und speichern."); return; }
+      if(perm!=="granted"){ startMessage("Berechtigung nicht erteilt – ohne sie kann Stundenzettel die Datei nicht öffnen und speichern."); return; }
       await openFromHandle(storedHandle);
     }catch(err){ startMessage("Die Datei konnte nicht geöffnet werden (verschoben oder gelöscht?): "+err.message); }
   };
@@ -671,7 +677,7 @@ async function createFromWizard(){
     const handle=await window.showSaveFilePicker({id:"stundenzettel-daten", startIn:"documents", suggestedName:`Stundenzettel-${year}.json`, types:PICKER_TYPES});
     const w=await handle.createWritable(); await w.write(JSON.stringify(ns,null,2)); await w.close();
     adoptState(ns, handle, {fileName:handle.name, lastModified:Date.now()});
-    toast("Datei angelegt: "+handle.name+" – V3 speichert ab jetzt automatisch dorthin.");
+    toast("Datei angelegt: "+handle.name+" – Stundenzettel speichert ab jetzt automatisch dorthin.");
   }catch(err){
     if(err && err.name==="AbortError") return;
     startMessage("Datei konnte nicht angelegt werden: "+err.message);
@@ -714,14 +720,12 @@ function markClean(){
   updateSaveStatusUI();
 }
 window.addEventListener("beforeunload", (e)=>{
-  // Schließen stempelt NICHT aus und pausiert keinen Auftrag. Gewarnt wird nur,
-  // solange heute noch eingestempelt ist, ein Auftrag läuft oder Änderungen nicht in einer Datei liegen.
-  if(!dataLoaded) return;
+  // Der Browser liefert den Standarddialog; beim Schließen wird nie gestempelt.
+  if(!dataLoaded || closingAfterChoice) return;
   const day = state && state.days && state.days[todayKey()];
   const stampedIn = Boolean(day && isDayOpen(day));
   const taskRunning = Boolean(state && state.tasks.some(t=>t.status==="in Arbeit"));
-  const unsaved = dirty && (!fileHandle || fileNeedsReconnect);
-  if(stampedIn || taskRunning || unsaved){ e.preventDefault(); e.returnValue=""; }
+  if(!window.StundenzettelTimeCore || StundenzettelTimeCore.shouldWarnBeforeUnload({dayOpen:stampedIn,taskRunning})){ e.preventDefault(); e.returnValue=""; }
 });
 window.addEventListener("pagehide", ()=>{ if(fileWriteTimer && fileHandle){ clearTimeout(fileWriteTimer); fileWriteTimer=null; writeToFile(); } });
 
@@ -812,7 +816,8 @@ function calcDay(k){
     else if(raw/60 >= 6 && pauseMin < 30) warn="!";
   }
 
-  return {day, dateObj, holiday, raw, pauseMin, ist, soll: soll == null ? null : round2(soll), diff, warn};
+  const tenHourStatus = ist==null ? "none" : (ist>10 ? "overflow" : (ist>=9.5 ? "near" : "none"));
+  return {day, dateObj, holiday, raw, pauseMin, ist, soll: soll == null ? null : round2(soll), diff, warn, tenHourStatus};
 }
 
 function monthRange(monthIdx /*0-11*/){
@@ -1186,6 +1191,14 @@ function renderHeuteKpis(k){
     kpis.appendChild(d);
   }
 }
+function todayMetrics(){
+  const k=todayKey(), c=calcDay(k), day=state.days[k]||{};
+  const kommt=day.stamps?.[0]||"";
+  const geht=computeGehtEmpfehlungen(new Date().getMonth()).rows.find(row=>row.code===state.settings.gehtEmpfehlung.activeCode)?.time||null;
+  const ten=tenHourLimitTime();
+  const remaining=time=>time&&kommt ? Math.max(0,timeToMin(time)-timeToMin(nowTimeStr())) : null;
+  return {ist:c.ist, kommt, ten, geht, remainingTen:remaining(ten), remainingGeht:remaining(geht)};
+}
 function renderHeute(){
   const k = todayKey();
   document.getElementById("heuteDatum").textContent = fmtDateDE(k)+" · "+WEEKDAY_LABELS[jsWeekdayKey(keyToDate(k))];
@@ -1252,7 +1265,7 @@ function doKommen(){
   d.stamps.push(t);
   markDirty(); renderHeute(); renderMiniPlayer(); toast("Kommt gestempelt: "+t);
 }
-function doGehen(feierabend){
+async function doGehen(feierabend){
   if(!ensureTodayYear()) return;
   feierabend = feierabend===true; // Klick-Events (Objekte) zählen nicht als Feierabend
   const k = todayKey();
@@ -1264,18 +1277,23 @@ function doGehen(feierabend){
   activeTaskPause(); // laufender Auftrag wird in beiden Fällen pausiert
   markDirty(); renderHeute(); renderMiniPlayer();
   if(!feierabend){ toast("Geht gestempelt: "+t+". Mit „Kommt“ geht es weiter."); return; }
-  const saveHint = fileHandle && !fileNeedsReconnect
-    ? "wird automatisch in die verbundene Datei gespeichert."
-    : "ist NICHT in einer Datei gespeichert – bitte Datei verbinden bzw. reaktivieren!";
-  toast("Feierabend gestempelt: "+t+" – "+saveHint, fileHandle&&!fileNeedsReconnect?undefined:"warn");
-  if(confirm("Feierabend gestempelt: "+t+". Tab jetzt schließen?")){
-    window.close();
-    setTimeout(()=>{
-      toast("Der Browser hat das automatische Schließen verhindert (nur bei per Skript geöffneten Tabs möglich). Bitte den Tab manuell schließen.", "warn");
-    }, 300);
-  }
+  if(fileWriteTimer){ clearTimeout(fileWriteTimer); fileWriteTimer=null; }
+  const saved=await writeToFile();
+  if(!saved){ toast("Feierabend gestempelt, aber nicht in die Datei gespeichert. Bitte Datei-Speicherung reaktivieren.","warn"); return; }
+  window.close();
+  setTimeout(()=>toast("Gestempelt und gespeichert – Fenster kann geschlossen werden."),350);
 }
 function doFeierabend(){ doGehen(true); }
+function closeAppWithoutStamp(){
+  closeModal(); closingAfterChoice=true; window.close();
+  setTimeout(()=>{ closingAfterChoice=false; toast("Der Browser hat das Schließen verhindert. Du kannst das Fenster jetzt manuell schließen.","warn"); },350);
+}
+function openCloseAppDialog(){
+  openModal(`<h2>App schließen</h2><p class="hint">Schließen ohne Stempeln verändert keine Zeiten. Für den Tagesabschluss stempelt „Feierabend“ Geht, speichert und schließt danach.</p><div class="btnrow"><button id="closeWithoutStamp" class="secondary">Ohne Stempeln schließen</button><button id="closeWithFeierabend" class="go">Feierabend stempeln und schließen</button><button id="closeCancel" class="secondary">Abbrechen</button></div>`);
+  document.getElementById("closeWithoutStamp").onclick=closeAppWithoutStamp;
+  document.getElementById("closeWithFeierabend").onclick=()=>{ closeModal(); doFeierabend(); };
+  document.getElementById("closeCancel").onclick=closeModal;
+}
 function doPauseStart(){
   if(!ensureTodayYear()) return;
   const day = ensureDay(todayKey());
@@ -1319,14 +1337,14 @@ async function openMiniPlayer(auto){
   styleEl.textContent = `
     :root{ --ink:#22262b; --ink-soft:#565f68; --paper:#f6f4ee; --line:#d8d3c4;
       --moss:#3f6b52; --rust:#a8442c; --amber:#b8791f;
-      --mono: ui-monospace,"SFMono-Regular","JetBrains Mono",Consolas,"Courier New",monospace;
+      --mono: -apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
       --sans: -apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif; }
     *{box-sizing:border-box;}
     body{margin:0; font-family:var(--sans); background:var(--paper); color:var(--ink); padding:10px 12px; font-size:12.5px;}
     .pp-head{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px;}
     .pp-head .t{font-weight:700; font-size:13px;}
     .pp-head .clock{font-family:var(--mono); color:var(--ink-soft); font-size:12px;}
-    .pp-stat{display:flex; gap:8px; margin-bottom:10px; font-family:var(--mono);}
+    .pp-stat{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; font-family:var(--mono);}
     .pp-stat div{flex:1; min-width:0;}
     .pp-stat .l{font-size:9.5px; color:var(--ink-soft); font-family:var(--sans); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
     .pp-stat .v{font-size:14px; font-weight:600;}
@@ -1370,8 +1388,9 @@ async function openMiniPlayer(auto){
     <div class="pp-head"><span class="t">Stundenzettel</span><span class="clock" id="ppClock"></span></div>
     <div class="pp-stat">
       <div><div class="l">IST heute</div><div class="v" id="ppIst">–</div></div>
-      <div><div class="l">Saldo</div><div class="v" id="ppSaldo">–</div></div>
-      <div><div class="l">10h-Grenze</div><div class="v" id="ppTenH">–</div></div>
+      <div><div class="l">Kommt heute</div><div class="v" id="ppKommt">–</div></div>
+      <div><div class="l">10h-Ende · Rest</div><div class="v" id="ppTenH">–</div></div>
+      <div><div class="l">Ende nach Code · Rest</div><div class="v" id="ppCodeEnd">–</div></div>
     </div>
     <div class="pp-btns">
       <button id="ppKommen">Kommt</button>
@@ -1500,23 +1519,35 @@ function fireBigAlert(msg, kind){
   flashPageTitle(kind==="danger" ? "⚠️ 10h-Grenze!" : "☕ Pause!", 15000);
   sendBrowserNotification(kind==="danger" ? "Stundenzettel — 10-Stunden-Grenze" : "Stundenzettel — Pausenerinnerung", msg);
 }
+function stopMiniPlayerPauseAlert(){
+  if(!pipWindow) return;
+  const body=pipWindow.document.body, alert=pipWindow.document.getElementById("ppAlert");
+  if(alert) alert.classList.remove("show");
+  if(body){ body.classList.remove("pp-flash","danger"); body.onclick=null; clearTimeout(pipWindow.__flashTimer); }
+}
+function firePauseAlert(msg){
+  const options=state.settings.pauseAlerts||{};
+  if(options.miniPlayer){
+    showMiniPlayerAlert(msg,"warn"); flashMiniPlayerBox("warn",600000); playAlertSound(); flashPageTitle("☕ Pause!",15000);
+  }
+  if(options.browser) sendBrowserNotification("Stundenzettel — Pausenerinnerung",msg);
+}
 
 function renderMiniPlayer(){
   if(!pipWindow) return;
   const doc = pipWindow.document;
   const k = todayKey();
-  const c = calcDay(k);
+  const c = calcDay(k), metrics=todayMetrics();
   const d = ensureDay(k);
   const openBal = yearBalanceSeries().find(p=>p.date===k)?.bal;
   const setText = (id,val)=>{ const el=doc.getElementById(id); if(el) el.textContent=val; };
   setText("ppClock", new Date().toLocaleTimeString("de-DE"));
   setText("ppIst", c.ist==null?"–":hoursToHM(c.ist));
-  const saldoEl = doc.getElementById("ppSaldo");
-  if(saldoEl){ saldoEl.textContent = hoursToHM(openBal); saldoEl.className = "v "+(openBal>=0?"pos":"neg"); }
-  const tLimit = tenHourLimitTime();
+  setText("ppKommt", metrics.kommt||"–");
+  const tLimit = metrics.ten;
   const tenHEl = doc.getElementById("ppTenH");
   if(tenHEl){
-    tenHEl.textContent = tLimit || "–";
+    tenHEl.textContent = tLimit ? `${tLimit} · ${minToTime(metrics.remainingTen)}` : "–";
     let cls = "v";
     if(tLimit){
       const nowStr = nowTimeStr();
@@ -1525,6 +1556,8 @@ function renderMiniPlayer(){
     }
     tenHEl.className = cls;
   }
+  const codeEl=doc.getElementById("ppCodeEnd");
+  if(codeEl){ codeEl.textContent=metrics.geht ? `${metrics.geht} · ${minToTime(metrics.remainingGeht)}` : "–"; codeEl.className="v"; }
   const kBtn = doc.getElementById("ppKommen"); if(kBtn) kBtn.disabled = isDayOpen(d);
   const gBtn = doc.getElementById("ppGehen"); if(gBtn) gBtn.disabled = !isDayOpen(d);
   const fBtn = doc.getElementById("ppFeierabend"); if(fBtn) fBtn.disabled = !isDayOpen(d);
@@ -1557,7 +1590,7 @@ function renderMiniPlayer(){
   }
 
   const stCount = (d.stamps||[]).length;
-  setText("ppHint", stCount===0 ? "Noch nicht gestempelt." : (isDayOpen(d) ? "Aktuell gestempelt (Kommt: "+d.stamps[stCount-1]+")." : stCount+" Zeiten heute erfasst."));
+  setText("ppHint", stCount===0 ? "Noch nicht gestempelt." : (isDayOpen(d) ? "Schließen stempelt nicht – für Stempeln und Schließen Feierabend verwenden." : stCount+" Zeiten heute erfasst."));
 }
 
 function updateMiniPlayerButtonLabel(){
@@ -1567,6 +1600,44 @@ function updateMiniPlayerButtonLabel(){
 }
 
 document.getElementById("btnMiniPlayer").addEventListener("click", ()=>openMiniPlayer(false));
+document.getElementById("btnCloseApp").addEventListener("click", openCloseAppDialog);
+
+/* ---------------- Zoom für Monats- und Jahresansicht ---------------- */
+(function(){
+  const KEY="stundenzettel-zoom";
+  const load=()=>{ try{ return JSON.parse(localStorage.getItem(KEY)||"{}"); }catch(e){ return {}; } };
+  function apply(id, value){
+    const view=document.getElementById(id); if(!view) return;
+    const z=Math.min(1.5,Math.max(0.4,value));
+    view.style.zoom=z;
+    const label=document.querySelector(`[data-zoom-target="${id}"] .zoom-val`); if(label) label.textContent=Math.round(z*100)+"%";
+    const saved=load(); saved[id]=z; try{ localStorage.setItem(KEY,JSON.stringify(saved)); }catch(e){}
+  }
+  function fit(id){
+    const view=document.getElementById(id); if(!view) return;
+    view.style.zoom=1;
+    const main=document.getElementById("main"), style=getComputedStyle(main);
+    const availW=main.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight);
+    const availH=window.innerHeight-parseFloat(style.paddingTop)-8;
+    // Umbrüche ändern sich mit dem Zoom: schrittweise verkleinern, bis Breite und Höhe passen.
+    let z=1;
+    for(; z>0.4; z=Math.round((z-0.01)*100)/100){
+      view.style.zoom=z;
+      const box=view.getBoundingClientRect();
+      if(box.height<=availH && document.documentElement.scrollWidth<=document.documentElement.clientWidth+1) break;
+    }
+    apply(id, z);
+  }
+  document.querySelectorAll("[data-zoom-target]").forEach(ctl=>{
+    const id=ctl.dataset.zoomTarget;
+    ctl.addEventListener("click",(e)=>{
+      const b=e.target.closest("[data-zoom]"); if(!b) return;
+      const cur=Number(document.getElementById(id).style.zoom)||1;
+      if(b.dataset.zoom==="fit") fit(id); else apply(id, cur+(b.dataset.zoom==="+"?0.1:-0.1));
+    });
+    const saved=load()[id]; if(saved) apply(id,saved);
+  });
+})();
 setInterval(renderMiniPlayer, 15000);
 
 document.addEventListener("visibilitychange", ()=>{
@@ -1634,13 +1705,11 @@ function renderZeitverteilung(monthIdx, istHours){
 function renderZeitverteilungJahr(){
   const box=document.getElementById("zeitverteilungJahr"); if(!box) return;
   const perMonth=[...Array(12)].map((_,m)=>timeDistribution(m));
-  const names=[...new Set(perMonth.flatMap(d=>Object.keys(d.stoer)))].sort();
   const cell=m=>m?fmtMin(m):"–";
   const rowOf=(label,get,bold)=>{ const vals=perMonth.map(get); const sum=vals.reduce((s,v)=>s+v,0); return `<tr><td class="lbl"${bold?"":' style="font-weight:400;"'}>${label}</td>${vals.map(v=>`<td class="val">${cell(v)}</td>`).join("")}<td class="val"><strong>${cell(sum)}</strong></td></tr>`; };
   box.innerHTML=`<h2>Zeitverteilung Aufträge / Störungen</h2><div class="tablewrap"><table class="compact-kv"><thead><tr><th></th>${MONTH_NAMES.map(m=>`<th>${m.slice(0,3)}</th>`).join("")}<th>Summe</th></tr></thead><tbody>
     ${rowOf("Aufträge",d=>d.auftrag,true)}
     ${rowOf("⚡ Störungen gesamt",d=>Object.values(d.stoer).reduce((s,v)=>s+v,0),true)}
-    ${names.map(n=>rowOf(escapeHtml(n),d=>d.stoer[n]||0,false)).join("")}
   </tbody></table></div>`;
 }
 
@@ -1658,35 +1727,18 @@ let expandedTimesDays = new Set();
 function buildTimesCellHTML(k, day){
   const stamps = day.stamps || [];
   const autoIdx = day.autoIdx || [];
-  const p1k = stamps[0]||"", p1g = stamps[1]||"";
-  const rest = stamps.slice(2);
-  const expanded = expandedTimesDays.has(k);
   const open = stamps.length % 2 === 1;
   const ac = i => autoIdx.includes(i) ? "auto-pending" : "";
-  let html = `<div class="times-wrap" data-day="${k}">`
-    + `<div class="time-row">`
-    + `<input type="time" lang="de-DE" class="time-stamp ${ac(0)}" data-day="${k}" data-idx="0" value="${p1k}">`
-    + `<input type="time" lang="de-DE" class="time-stamp ${ac(1)}" data-day="${k}" data-idx="1" value="${p1g}">`;
-  if(rest.length){
-    html += `<span class="time-toggle" data-day="${k}">${expanded?"▾ weniger":"▸ +"+rest.length}</span>`;
+  const pairs=[];
+  for(let i=0;i<Math.max(2,stamps.length);i+=2){
+    pairs.push(`<span class="time-pair"><input type="time" lang="de-DE" class="time-stamp ${ac(i)}" data-day="${k}" data-idx="${i}" value="${stamps[i]||""}"><span>–</span><input type="time" lang="de-DE" class="time-stamp ${ac(i+1)}" data-day="${k}" data-idx="${i+1}" value="${stamps[i+1]||""}"></span>`);
   }
-  if(!rest.length || expanded){
-    html += `<button type="button" class="time-add" data-day="${k}"${open?" disabled title=\"Bitte zuerst Geht eintragen\"":""}>+ Zeit</button>`;
-  }
-  html += `</div>`;
-  if(expanded && rest.length){
-    html += rest.map((t,i)=>{
-      const idx = i+2;
-      return `<div class="time-line"><input type="time" lang="de-DE" class="time-stamp ${ac(idx)}" data-day="${k}" data-idx="${idx}" value="${t||""}">`
-        + `<button type="button" class="time-del" data-day="${k}" data-idx="${idx}" title="Löschen">✕</button></div>`;
-    }).join("");
-  }
-  html += `</div>`;
+  const html = `<div class="times-wrap" data-day="${k}"><div class="time-row">${pairs.join('<span class="time-separator">·</span>')}<button type="button" class="time-add" data-day="${k}"${open?" disabled title=\"Bitte zuerst Geht eintragen\"":""}>+ Zeit</button></div></div>`;
   return html;
 }
 
 function applyAutoGehtPrediction(){
-  // Empfehlungen bleiben sichtbar; V3 schreibt beim Rendern niemals eigenständig einen Stempelvorschlag.
+  // Empfehlungen bleiben sichtbar; Stundenzettel schreibt beim Rendern niemals eigenständig einen Stempelvorschlag.
   return;
   const k = todayKey();
   const d = ensureDay(k);
@@ -1744,6 +1796,7 @@ function renderMonat(){
     else if(wk==="so") cls.push("sunday");
     if(c.holiday) cls.push("holiday");
     if(k===tk) cls.push("today");
+    if(c.tenHourStatus==="overflow") cls.push("over-ten");
     tr.className = cls.join(" ");
     const dayCode = state.days[k]?.code;
     const codeCol = dayCode ? codeColor(dayCode) : null;
@@ -1758,7 +1811,7 @@ function renderMonat(){
       <td>${timesHtml}</td>
       <td><input data-day="${k}" data-f="pause" placeholder="Min." value="${state.days[k]?.pause||""}" style="width:56px;"></td>
       <td class="num">${minToTime(c.pauseMin)}</td>
-      <td class="warnflag">${c.warn}</td>
+      <td class="warnflag" title="${c.tenHourStatus==="overflow"?"Nettoarbeitszeit über 10 Stunden":""}">${c.tenHourStatus==="overflow"?"⚠ 10h":c.warn}</td>
       <td>${codeSelectHtml(k, state.days[k]?.code||"")}</td>
       <td><input class="wide" data-day="${k}" data-f="bemerkung" value="${String(state.days[k]?.bemerkung||"").replace(/"/g,'&quot;')}"></td>
       <td class="num">${c.ist==null?"":hoursToHM(c.ist)}</td>
@@ -2371,7 +2424,7 @@ function renderRunningTask(){
       <div class="run-main"><div class="run-nr">${escapeHtml(t.orderNr||"(ohne Nr.)")}</div>
       <div class="run-meta">${isSt?(interrupted?"unterbricht Auftrag "+escapeHtml(interrupted.orderNr||"(ohne Nr.)"):"&nbsp;"):([t.modul,t.station,t.aenderung].filter(Boolean).map(escapeHtml).join(" · ")||"&nbsp;")}</div></div>
       <div class="run-time"><span class="hint">Gesamt</span> <strong>${minToTime(totalTaskMinutes(t.id)+live)}</strong> <span class="hint">· seit Start ${live} Min.</span></div>
-      <div class="run-actions">${isSt?`<button data-run="stop" data-id="${t.id}" class="run-btn">⏹ Störung beenden</button>`:`<button data-run="stop" data-id="${t.id}" class="run-btn">⏸ Pause</button><button data-run="fertig" data-id="${t.id}" class="secondary fertig-btn run-btn">✔ Fertig</button>`}</div>`;
+      <div class="run-actions">${isSt?`<button data-run="stop" data-id="${t.id}" class="run-btn">⏹ Störung beenden</button>`:`<button data-run="stop" data-id="${t.id}" class="run-btn">⏸ Pause</button><button data-run="fertig" data-id="${t.id}" class="secondary fertig-btn run-btn">✔ Fertig</button>`}<button data-run="edit" data-id="${t.id}" class="secondary run-btn">Bearbeiten</button></div>`;
   }
   box.querySelectorAll("[data-run]").forEach(b=>b.onclick=()=>{
     const id=Number(b.dataset.id), act=b.dataset.run;
@@ -2381,7 +2434,10 @@ function renderRunningTask(){
       if(tk && tk.kind==="stoerung"){ endStoerung(id); return; }
       taskPause(id);
     }
-    else if(act==="fertig"){
+    else if(act==="edit"){
+      const task=state.tasks.find(x=>x.id===id);
+      ["orderNr","modul","station","aenderung"].forEach(field=>{ const value=prompt(`${field}:`,task[field]||""); if(value!==null) updateTaskMetadata(task,field,value); });
+    } else if(act==="fertig"){
       const task=state.tasks.find(x=>x.id===id);
       if(!confirm(`Auftrag „${(task&&task.orderNr)||"(ohne Nr.)"}" als fertig markieren?`)) return;
       taskFinish(id);
@@ -2458,7 +2514,7 @@ function renderAuftraege(){
         ${statusCell}
         <td class="num">${t.datum ? fmtDateDE(t.datum) : "–"}</td>
         <td class="num">${minToTime(dauer)}</td>
-        <td><input class="task-inline" type="number" data-task-id="${t.id}" data-task-field="manualDurationOffsetMinutes" value="${Number(t.manualDurationOffsetMinutes)||0}"></td>
+        <td><input class="task-inline" type="text" inputmode="numeric" placeholder="H:MM" data-task-id="${t.id}" data-task-field="manualDurationOffsetMinutes" value="${formatOffsetHM(t.manualDurationOffsetMinutes)}"></td>
         <td>${t.status!=="fertig"?`<button class="secondary" data-act="fertig" data-id="${t.id}">ausblenden</button>`:""}</td>`;
       tbody.appendChild(tr); return;
     }
@@ -2472,7 +2528,7 @@ function renderAuftraege(){
       <td><select class="task-inline" data-task-id="${t.id}" data-task-field="status"><option ${t.status==='warten'?'selected':''}>warten</option><option ${t.status==='in Arbeit'?'selected':''}>in Arbeit</option><option ${t.status==='Pause'?'selected':''}>Pause</option><option ${t.status==='fertig'?'selected':''}>fertig</option></select></td>
       <td class="num">${t.datum ? fmtDateDE(t.datum) : "–"}</td>
       <td class="num">${minToTime(dauer)}</td>
-      <td><input class="task-inline" type="number" data-task-id="${t.id}" data-task-field="manualDurationOffsetMinutes" value="${Number(t.manualDurationOffsetMinutes)||0}"></td>
+      <td><input class="task-inline" type="text" inputmode="numeric" placeholder="H:MM" data-task-id="${t.id}" data-task-field="manualDurationOffsetMinutes" value="${formatOffsetHM(t.manualDurationOffsetMinutes)}"></td>
       <td>${t.status!=="fertig"?`<button class="secondary fertig-btn" data-act="fertig" data-id="${t.id}">fertig</button>`:""}</td>
     `;
     tbody.appendChild(tr);
@@ -2500,7 +2556,12 @@ function renderAuftraege(){
   tbody.querySelectorAll("[data-task-field]").forEach(el=>el.addEventListener("change", e=>{
     const task=state.tasks.find(t=>t.id===Number(e.target.dataset.taskId));
     const field=e.target.dataset.taskField;
-    task[field]=field==="manualDurationOffsetMinutes" ? (Number(e.target.value)||0) : e.target.value;
+    if(field==="manualDurationOffsetMinutes"){
+      const raw=String(e.target.value).trim(), neg=raw.startsWith("-"), parsed=raw===""?0:parseDurationInput(neg?raw.slice(1):raw);
+      if(parsed==null){ toast("Bitte Extra-Zeit als H:MM eingeben, z. B. 0:30 oder -0:15.","warn"); renderAuftraege(); return; }
+      task[field]=neg?-parsed:parsed;
+    }
+    else updateTaskMetadata(task,field,e.target.value);
     markDirty(); renderAuftraege();
   }));
   thead.querySelectorAll("th.sortable").forEach(th=>{
@@ -2568,6 +2629,11 @@ function renderAuftraege(){
     renderAuftraege();
   }));
   installColumnResizers(document.getElementById("logTable"), state.ui.logTableColumnWidths);
+}
+function updateTaskMetadata(task, field, value){
+  if(!task) return;
+  task[field]=value;
+  state.log.filter(entry=>entry.taskId===task.id).forEach(entry=>{ entry[field]=value; });
 }
 function totalTaskMinutes(taskId){
   const task=state.tasks.find(t=>t.id===taskId);
@@ -2819,14 +2885,14 @@ function renderRulesEditor(){
   const r=rulesOf(), groups=["moDo","fr","sa"];
   const tbl=document.getElementById("rulesTable");
   tbl.innerHTML=`<thead><tr><th></th>${groups.map(g=>`<th>${GROUP_LABEL[g]}</th>`).join("")}</tr></thead><tbody>
-    <tr><td>Pause (Min.)</td>${groups.map(g=>`<td><input type="number" step="1" data-r="pause" data-g="${g}" value="${r.pause[g]}"></td>`).join("")}</tr>
+    <tr><td>Pause (H:MM)</td>${groups.map(g=>`<td><input data-r="pause" data-g="${g}" placeholder="0:30" value="${minToTime(r.pause[g])}"></td>`).join("")}</tr>
     <tr><td>Kernzeit</td>${groups.map(g=>`<td><input type="time" data-r="kernzeit" data-g="${g}" value="${r.kernzeit[g]||""}"></td>`).join("")}</tr></tbody>`;
   tbl.querySelectorAll("input").forEach(el=>el.onchange=()=>{ const g=el.dataset.g;
-    if(el.dataset.r==="pause") r.pause[g]=Number(el.value)||0; else r.kernzeit[g]=el.value; markDirty(); });
-  const bind=(id,fn,val)=>{ const el=document.getElementById(id); el.value=val; el.onchange=()=>{ fn(el.value); markDirty(); }; };
-  bind("rPauseHoliday",v=>r.pause.holiday=Number(v)||0,r.pause.holiday);
+    if(el.dataset.r==="pause"){ const minutes=parseDurationInput(el.value); if(minutes==null){ toast("Bitte Dauer als H:MM eingeben, z. B. 0:30.","warn"); renderRulesEditor(); return; } r.pause[g]=minutes; } else r.kernzeit[g]=el.value; markDirty(); });
+  const bind=(id,fn,val,format)=>{ const el=document.getElementById(id); el.value=format?minToTime(val):val; el.onchange=()=>{ const value=format?parseDurationInput(el.value):el.value; if(value==null){ toast("Bitte Dauer als H:MM eingeben, z. B. 0:30.","warn"); renderRulesEditor(); return; } fn(value); markDirty(); }; };
+  bind("rPauseHoliday",v=>r.pause.holiday=v,r.pause.holiday,true);
   bind("rLongHours",v=>r.longThresholdHours=Number(v)||0,r.longThresholdHours);
-  bind("rLongPause",v=>r.longPauseMin=Number(v)||0,r.longPauseMin);
+  bind("rLongPause",v=>r.longPauseMin=v,r.longPauseMin,true);
   bind("rLatestEnd",v=>r.latestEnd=v||"18:30",r.latestEnd);
   const box=document.getElementById("rBreaksEditor");
   box.innerHTML=groups.map(g=>`<div class="breaks-group"><h4>${GROUP_LABEL[g]}</h4>${(r.breaks[g]||[]).map((b,i)=>`<div class="break-row"><input type="time" data-g="${g}" data-i="${i}" data-f="start" value="${b.start}"><span>–</span><input type="time" data-g="${g}" data-i="${i}" data-f="end" value="${b.end}"><input data-g="${g}" data-i="${i}" data-f="label" value="${escapeHtml(b.label||"")}" placeholder="Bezeichnung"><button type="button" class="secondary" data-del-g="${g}" data-del-i="${i}">✕</button></div>`).join("")||'<div class="hint">Keine festen Pausen.</div>'}<button type="button" class="secondary" data-add-g="${g}">+ Pause</button></div>`).join("");
@@ -2840,15 +2906,21 @@ function renderEinstellungen(){
   renderSettingsYearSwitcher();
   document.getElementById("sName").value = state.settings.name;
   document.getElementById("sPersNr").value = state.settings.personalNr;
+  document.getElementById("sDurationFormat").value = state.ui.durationFormat;
   document.getElementById("sStempeln").value = state.settings.stempelnAktiv ? "ja":"nein";
   document.getElementById("sMiniAuto").value = state.settings.miniPlayerAutoOpen ? "ja":"nein";
+  document.getElementById("sPauseMiniAlert").checked = state.settings.pauseAlerts.miniPlayer;
+  document.getElementById("sPauseBrowserAlert").checked = state.settings.pauseAlerts.browser;
   document.getElementById("sOffsetKommen").value = state.settings.stempelOffsetKommenMin;
   document.getElementById("sOffsetGehen").value = state.settings.stempelOffsetGehenMin;
 
   document.getElementById("sName").onchange=(e)=>{ state.settings.name=e.target.value; markDirty(); };
   document.getElementById("sPersNr").onchange=(e)=>{ state.settings.personalNr=e.target.value; markDirty(); };
+  document.getElementById("sDurationFormat").onchange=(e)=>{ state.ui.durationFormat=e.target.value; markDirty(); renderAll(); };
   document.getElementById("sStempeln").onchange=(e)=>{ state.settings.stempelnAktiv = e.target.value==="ja"; markDirty(); };
   document.getElementById("sMiniAuto").onchange=(e)=>{ state.settings.miniPlayerAutoOpen = e.target.value==="ja"; markDirty(); };
+  document.getElementById("sPauseMiniAlert").onchange=(e)=>{ state.settings.pauseAlerts.miniPlayer=e.target.checked; markDirty(); };
+  document.getElementById("sPauseBrowserAlert").onchange=(e)=>{ state.settings.pauseAlerts.browser=e.target.checked; markDirty(); };
   document.getElementById("sOffsetGehen").onchange=(e)=>{ state.settings.stempelOffsetGehenMin = Number(e.target.value)||0; markDirty(); };
   document.getElementById("sOffsetKommen").onchange=(e)=>{ state.settings.stempelOffsetKommenMin = Number(e.target.value)||0; markDirty(); };
 
@@ -2989,7 +3061,7 @@ function autoStampKommenOnOpen(){
 }
 
 /* ---------------- Auto-Stempeln & Pausenerinnerung ---------------- */
-let firedBreaks = new Set();
+let autoSchedulerTimer = null;
 let lastCyclicWarnAt = {}; // Tag-Key -> Timestamp der letzten zyklischen 9h/10h-Warnung
 const CYCLIC_WARN_INTERVAL_MS = 15*60*1000; // alle 15 Min. erneut warnen, solange noch offen gestempelt
 function shiftLimitTime(hoursAfterKommtNetto){
@@ -3024,6 +3096,17 @@ function checkTenHourLimit(){
     : "Schon über 9 Stunden gearbeitet — 10h-Grenze um "+tenT+".";
   fireBigAlert(msg, overTen ? "danger" : "warn");
 }
+function scheduledBreakState(){ return state.ui.scheduledBreaks || (state.ui.scheduledBreaks={}); }
+function showScheduledPauseDialog(event){
+  const item=event.item, entry=scheduledBreakState()[event.id];
+  if(entry?.dialogOpen) return;
+  scheduledBreakState()[event.id]=Object.assign({},entry,{dialogOpen:true});
+  openModal(`<h2>Geplante Pause: ${escapeHtml(item.label||"Pause")}</h2><p class="hint">${escapeHtml(item.start)}–${escapeHtml(item.end)} wird gemäß deinen Regeln automatisch abgezogen. Die Bestätigung beendet nur die Mini-Player-Warnung.</p><div class="btnrow"><button id="scheduledPauseConfirm" class="go">Pause gemacht</button></div>`,true);
+  document.getElementById("scheduledPauseConfirm").onclick=()=>{
+    scheduledBreakState()[event.id]={start:true,acknowledged:true};
+    stopMiniPlayerPauseAlert(); markDirty(); closeModal();
+  };
+}
 function checkAutoStamps(){
   if(!dataLoaded) return;
   checkTenHourLimit();
@@ -3031,28 +3114,19 @@ function checkAutoStamps(){
   const k = dateKey(now);
   const wd = jsWeekdayKey(now);
   if(wd==="sa"||wd==="so") return;
-
-  const nowStr = pad2(now.getHours())+":"+pad2(now.getMinutes());
-  const schedule = (rulesOf().breaks[dayGroup(now)]||[]).filter(b=>b.start&&b.end).map(b=>[b.start,b.end,b.label||"Pause"]);
-
-  for(const [start,end,tag] of schedule){
-    const startKey = k+"_"+tag+"_start";
-    const endKey = k+"_"+tag+"_end";
-    if(nowStr===start && !firedBreaks.has(startKey)){
-      firedBreaks.add(startKey);
-      const activeTask = state.tasks.find(t=>t.status==="in Arbeit");
-      if(activeTask && state.settings.stempelnAktiv){ taskPause(activeTask.id); markDirty(); renderHeute(); renderMiniPlayer(); if(currentView==="auftraege") renderAuftraege(); }
-      fireBigAlert("☕ Pause: "+tag+" beginnt jetzt ("+start+")."+(activeTask&&state.settings.stempelnAktiv?" Auftrag „"+(activeTask.orderNr||"ohne Nr.")+"“ automatisch pausiert.":""), "warn");
-    }
-    if(nowStr===end && !firedBreaks.has(endKey)){
-      firedBreaks.add(endKey);
-      const pausedTask = state.tasks.find(t=>t.status==="Pause");
-      if(pausedTask && state.settings.stempelnAktiv){ taskStart(pausedTask.id); markDirty(); renderHeute(); renderMiniPlayer(); if(currentView==="auftraege") renderAuftraege(); }
-      fireBigAlert("☕ Pause: "+tag+" endet jetzt ("+end+")."+(pausedTask&&state.settings.stempelnAktiv?" Auftrag „"+(pausedTask.orderNr||"ohne Nr.")+"“ automatisch fortgesetzt.":""), "warn");
-    }
-  }
+  const fired=scheduledBreakState(), schedule=rulesOf().breaks[dayGroup(now)]||[];
+  const due=window.StundenzettelTimeCore?.dueScheduledBreaks({date:k,nowMinutes:now.getHours()*60+now.getMinutes(),breaks:schedule,fired})||[];
+  due.forEach(event=>{
+    const entry=fired[event.id]||{};
+    if(event.type==="start"){ fired[event.id]=Object.assign({},entry,{start:true}); firePauseAlert("☕ Pause fällig: "+(event.item.label||"Pause")+"."); if(state.settings.pauseAlerts?.miniPlayer) showScheduledPauseDialog(event); }
+  });
 }
-/* no automatic stamping V3 */
+function initAutoScheduler(){
+  if(autoSchedulerTimer || !dataLoaded) return;
+  checkAutoStamps();
+  autoSchedulerTimer=setInterval(checkAutoStamps,30000);
+}
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible") checkAutoStamps(); });
 
 /* ---------------- Clock ---------------- */
 setInterval(()=>{

@@ -18,6 +18,7 @@
     <button id="btnReconnectHeader" class="secondary" style="display:none; width:100%; margin:6px 0 0; font-size:11.5px; padding:6px 8px;">Datei-Speicherung reaktivieren</button>
     <span id="railClock"></span>
     <button id="btnMiniPlayer" class="secondary" style="width:100%; margin-top:10px; margin-left:0; font-size:11.5px; padding:6px 8px;">🗗 Mini-Player öffnen</button>
+    <button id="btnCloseApp" class="secondary" style="width:100%; margin-top:6px; margin-left:0; font-size:11.5px; padding:6px 8px;">App schließen…</button>
   </div>
 </nav>
 
@@ -42,7 +43,7 @@
         <button class="secondary" id="btnPauseStart">Pause Start</button>
         <button class="secondary" id="btnPauseStop">Pause Ende</button>
       </div>
-      <p class="hint">Stempelungen erfolgen ausschließlich über die Schaltflächen oder durch manuelle Eingabe. Pausenwerte folgen der eingestellten Pausenregel (Einstellungen → Arbeitszeit). Bitte bei Bedarf manuell prüfen und anpassen.</p>
+      <p class="hint">Schließen stempelt nicht. Zum Stempeln und Schließen <strong>Feierabend</strong> verwenden. Pausenwerte folgen der eingestellten Pausenregel (Einstellungen → Arbeitszeit).</p>
     </div>
 
     <div class="panel">
@@ -55,7 +56,7 @@
 
   <!-- MONAT -->
   <div class="view" id="view-monat">
-    <h1>Monatsansicht</h1>
+    <div class="view-head"><h1>Monatsansicht</h1><div class="zoom-ctl" data-zoom-target="view-monat"><button class="secondary" data-zoom="-">−</button><span class="zoom-val">100%</span><button class="secondary" data-zoom="+">+</button><button class="secondary" data-zoom="fit">Auf Seite anpassen</button></div></div>
     <div id="monatTabs" class="sheet-tabs"></div>
     <div class="monat-layout">
       <div class="monat-col-main">
@@ -74,16 +75,19 @@
           </table>
         </div>
         <p class="hint">Die Pause wird nach der Pausenregel berechnet (Einstellungen → Arbeitszeit), außer eine eigene Pausenzeit ist eingetragen. „!“ markiert eine gesetzlich zu kurze Pause. Ein komplett leerer Tag (keine Zeiten, kein Code) zählt nicht mit.</p>
+        <div class="panel">
+          <h2>Monatsverlauf <small>Gleitzeitsaldo je Tag über den Monat</small></h2>
+          <div class="chart-wrap"><svg id="monatChart" viewBox="0 0 1600 420" preserveAspectRatio="xMidYMid meet"></svg></div>
+        </div>
+      </div>
 
+      <div class="monat-col-side">
         <div class="panel" id="monatAbschluss"></div>
         <div class="panel">
           <h2>Monatsübersicht</h2>
           <div class="kv-grid" id="monatKennzahlenTable"></div>
         </div>
         <div class="panel" id="zeitverteilungMonat"></div>
-      </div>
-
-      <div class="monat-col-side">
         <div class="panel" id="gehtPanel">
           <h2>Geht-Empfehlung heute <small id="gehtPanelSub"></small></h2>
           <div id="gehtActive" style="margin-bottom:10px;"></div>
@@ -99,36 +103,33 @@
         </div>
       </div>
     </div>
-
-    <div class="panel">
-      <h2>Monatsverlauf <small>Gleitzeitsaldo je Tag über den Monat</small></h2>
-      <div class="chart-wrap"><svg id="monatChart" viewBox="0 0 1600 420" preserveAspectRatio="xMidYMid meet"></svg></div>
-    </div>
   </div>
 
   <!-- JAHR -->
   <div class="view" id="view-jahr">
-    <h1>Jahresübersicht</h1>
+    <div class="view-head"><h1>Jahresübersicht</h1><div class="zoom-ctl" data-zoom-target="view-jahr"><button class="secondary" data-zoom="-">−</button><span class="zoom-val">100%</span><button class="secondary" data-zoom="+">+</button><button class="secondary" data-zoom="fit">Auf Seite anpassen</button></div></div>
     <div id="jahrArchiveBanner" style="display:none; padding:6px 10px; background:#f6ece2; border:1px solid var(--amber); border-radius:var(--radius); font-size:12.5px; font-weight:600; margin-bottom:10px;"></div>
     <div class="kpis" id="jahrKpis"></div>
-    <div class="panel">
+    <div class="jahr-grid">
+    <div class="panel jahr-calendar">
       <h2>Kalenderübersicht <small>Tag × Monat, wie im Original — Kürzel bzw. Punkt = gearbeiteter Tag</small></h2>
       <div class="tablewrap" style="max-height:none;">
         <table id="jahrKalender"><thead></thead><tbody></tbody></table>
       </div>
       <div class="hint" id="jahrLegende" style="margin-top:8px;"></div>
     </div>
-    <div class="panel">
+    <div class="panel jahr-chart">
       <h2>Saldoverlauf <small>Gleitzeitsaldo je Tag über das Jahr</small></h2>
       <div class="chart-wrap"><svg id="jahrChart" viewBox="0 0 1080 290" preserveAspectRatio="xMidYMid meet"></svg></div>
     </div>
-    <div class="panel">
+    <div class="panel jahr-months">
       <h2>Monatsübersicht</h2>
       <div class="tablewrap" style="max-height:none;">
         <table id="jahrTable"><thead></thead><tbody></tbody></table>
       </div>
     </div>
-    <div class="panel" id="zeitverteilungJahr"></div>
+    <div class="panel jahr-zeit" id="zeitverteilungJahr"></div>
+    </div>
   </div>
 
   <!-- AUFTRÄGE -->
@@ -247,6 +248,7 @@
       <h2>Allgemein</h2>
       <div class="set-row"><div class="set-label"><strong>Name</strong></div><div class="set-ctl"><input id="sName"></div></div>
       <div class="set-row"><div class="set-label"><strong>Personal-Nummer</strong></div><div class="set-ctl"><input id="sPersNr"></div></div>
+      <div class="set-row"><div class="set-label"><strong>Anzeige von Dauern</strong><small>Berechnete Werte werden standardmäßig dezimal angezeigt; Eingaben für Dauern erfolgen immer als H:MM.</small></div><div class="set-ctl"><select id="sDurationFormat"><option value="decimal">Dezimalstunden (z. B. 7,50)</option><option value="hm">Stunden:Minuten (z. B. 7:30)</option></select></div></div>
       <div class="set-row" id="installRow" hidden><div class="set-label"><strong>Als App installieren</strong><small id="installStatus"></small></div><div class="set-ctl"><button id="btnInstallApp" hidden>Als App installieren</button></div></div>
       <div class="set-row" id="updateRow" hidden><div class="set-label"><strong>Programm-Updates</strong><small id="updateVersion">Installierte Version wird ermittelt …</small><small id="updateStatus">Updates werden nur auf deine Anforderung geprüft.</small></div><div class="set-ctl"><button id="btnCheckUpdate" class="secondary">Auf Updates prüfen</button><button id="btnInstallUpdate" hidden>Update installieren</button></div></div>
     </div>
@@ -265,6 +267,8 @@
       <h2>Mini-Player &amp; Meldungen</h2>
       <div class="set-row"><div class="set-label"><strong>Mini-Player beim Minimieren öffnen</strong><small>Öffnet sich nur, wenn kurz zuvor in der App geklickt wurde (Browser-Sicherheitsgrenze). Sonst hilft der Button unten links.</small></div>
         <div class="set-ctl"><select id="sMiniAuto"><option value="ja">Ja</option><option value="nein">Nein</option></select></div></div>
+      <div class="set-row"><div class="set-label"><strong>Pausen im Mini-Player warnen</strong><small>Zeigt den Pausenhinweis, lässt den Mini-Player blinken und spielt einen Ton.</small></div><div class="set-ctl"><label class="chk"><input type="checkbox" id="sPauseMiniAlert"> Aktiv</label></div></div>
+      <div class="set-row"><div class="set-label"><strong>Browser-Benachrichtigung bei Pausen</strong><small>Sendet zusätzlich eine Desktop-Meldung, wenn der Browser dies erlaubt.</small></div><div class="set-ctl"><label class="chk"><input type="checkbox" id="sPauseBrowserAlert"> Aktiv</label></div></div>
       <div class="set-row"><div class="set-label"><strong>Benachrichtigungen</strong><small>Pausen- und 10h-Warnungen blitzen den Mini-Player, spielen einen Ton und können zusätzlich als Desktop-Meldung erscheinen. Der Ton bleibt stumm, wenn lange nicht interagiert wurde.</small><div id="notifStatus" style="margin-top:8px;"></div></div>
         <div class="set-ctl"><button class="secondary" id="btnNotifPermission">🔔 Browser-Benachrichtigungen erlauben</button><button class="secondary" id="btnNotifTest" hidden style="margin-top:8px;">Testmeldung senden</button></div></div>
     </div>
@@ -279,11 +283,11 @@
       <h2>Pausen &amp; Kernzeit</h2>
       <div class="set-row stack"><div class="set-label"><strong>Je Tagesgruppe</strong><small>Pausenlänge, wenn keine eigene Pause eingetragen ist, und Kernzeit für die Geht-Empfehlung „K“.</small></div>
         <div class="set-ctl"><table class="rules-table" id="rulesTable"></table></div></div>
-      <div class="set-row"><div class="set-label"><strong>Pause an Feiertagen</strong><small>Gilt anstelle der Tagesgruppe, wenn der Tag ein Feiertag ist.</small></div><div class="set-ctl unit"><input type="number" step="1" id="rPauseHoliday"><span>Min.</span></div></div>
+      <div class="set-row"><div class="set-label"><strong>Pause an Feiertagen</strong><small>Gilt anstelle der Tagesgruppe, wenn der Tag ein Feiertag ist. Eingabe als H:MM.</small></div><div class="set-ctl unit"><input id="rPauseHoliday" placeholder="0:30"><span>H:MM</span></div></div>
       <div class="set-row"><div class="set-label"><strong>Lange Pause ab Anwesenheit</strong><small>Ab dieser Netto-Zeit (Anwesenheit minus normale Pause) gilt die lange Pause.</small></div><div class="set-ctl unit"><input type="number" step="0.5" id="rLongHours"><span>h</span></div></div>
-      <div class="set-row"><div class="set-label"><strong>Länge der langen Pause</strong></div><div class="set-ctl unit"><input type="number" step="1" id="rLongPause"><span>Min.</span></div></div>
+      <div class="set-row"><div class="set-label"><strong>Länge der langen Pause</strong></div><div class="set-ctl unit"><input id="rLongPause" placeholder="0:45"><span>H:MM</span></div></div>
       <div class="set-row"><div class="set-label"><strong>Spätestes Arbeitsende</strong><small>Begrenzt die 9h-/10h-Zeiten und -Warnungen.</small></div><div class="set-ctl"><input type="time" id="rLatestEnd"></div></div>
-      <div class="set-row stack"><div class="set-label"><strong>Feste Pausen</strong><small>Zu diesen Zeiten erinnert V3 und pausiert (bei aktivem automatischem Stempeln) den laufenden Auftrag.</small></div>
+      <div class="set-row stack"><div class="set-label"><strong>Feste Pausen</strong><small>Zu diesen Zeiten erinnert Stundenzettel und pausiert (bei aktivem automatischem Stempeln) den laufenden Auftrag.</small></div>
         <div class="set-ctl" id="rBreaksEditor"></div></div>
     </div>
 

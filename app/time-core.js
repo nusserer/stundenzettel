@@ -6,6 +6,31 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function (browserCrypto) {
   const isTime = value => /^\d{2}:\d{2}$/.test(value || '');
   const toMinutes = value => { const [h, m] = value.split(':').map(Number); return h * 60 + m; };
+  function parseDuration(value) {
+    if (typeof value === 'number' && Number.isFinite(value)) return Math.round(value * 60);
+    const match = String(value || '').trim().match(/^(\d+):([0-5]\d)$/);
+    return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+  }
+  function formatDuration(minutes, mode = 'decimal') {
+    if (!Number.isFinite(minutes)) return '–';
+    const sign = minutes < 0 ? '-' : '';
+    const absolute = Math.abs(Math.round(minutes));
+    if (mode === 'hm') return `${sign}${Math.floor(absolute / 60)}:${String(absolute % 60).padStart(2, '0')}`;
+    return `${sign}${(absolute / 60).toFixed(2).replace('.', ',')}`;
+  }
+  function dueScheduledBreaks({ date, nowMinutes, breaks, fired = {} }) {
+    const result = [];
+    for (const item of breaks || []) {
+      if (!isTime(item?.start) || !isTime(item?.end)) continue;
+      const id = `${date}:${item.start}:${item.end}:${item.label || 'Pause'}`;
+      const start = toMinutes(item.start), end = toMinutes(item.end);
+      const state = fired[id] || {};
+      if (nowMinutes >= start && nowMinutes < end && !state.start) result.push({ type: 'start', id, item });
+
+    }
+    return result;
+  }
+  function shouldWarnBeforeUnload({ dayOpen, taskRunning }) { return Boolean(dayOpen || taskRunning); }
 
   function validateYearData(data) {
     const findings = [];
@@ -65,5 +90,5 @@
     }
     return total;
   }
-  return { validateYearData, monthDayKeys, summarizeMonthRecords, legacyStampsToEvents, createEvent, calculateWorkMinutes, calculateLegacyStampMinutes };
+  return { validateYearData, monthDayKeys, summarizeMonthRecords, legacyStampsToEvents, createEvent, calculateWorkMinutes, calculateLegacyStampMinutes, parseDuration, formatDuration, dueScheduledBreaks, shouldWarnBeforeUnload };
 });
