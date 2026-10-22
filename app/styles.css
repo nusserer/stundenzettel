@@ -135,6 +135,8 @@
   table,th,td,input,select,textarea,button,.kpi .v,.calc-table,table.compact-kv,.kv-row{font-family:var(--sans); font-variant-numeric:tabular-nums;}
   table{width:100%; border-collapse:collapse; font-size:13px;}
   #monatTable{table-layout:fixed;}
+  #monatTable{border:1px solid #bdb7a4;}
+  #monatTable th,#monatTable td{border:1px solid #cfc9b6;}
   #monatTable td{overflow:hidden;}
   #monatTable td.wide-cell{overflow:visible;}
   th{

@@ -34,6 +34,7 @@ function formatDurationHours(h){
 }
 function hoursToHM(h){ return formatDurationHours(h); }
 function formatOffsetHM(minutes){ return StundenzettelTimeCore.formatDuration(Number(minutes)||0,"hm"); }
+function fmtDurMin(m){ return m==null||isNaN(m) ? "" : formatDurationHours(m/60); }
 function parseDurationInput(value){ return window.StundenzettelTimeCore ? StundenzettelTimeCore.parseDuration(value) : null; }
 function round2(x){ return Math.round(x*100)/100; }
 function todayKey(){ return dateKey(new Date()); }
@@ -749,16 +750,16 @@ function rawWorkedMinutes(day, liveNow){
 }
 
 function calcPauseMinutes(day, dateObj, holiday, liveNow){
-  if(day.pause != null && day.pause !== "" ) return Number(day.pause);
-  if(Array.isArray(day.dayPauses) && day.dayPauses.length && window.StundenzettelDayPause){
-    return StundenzettelDayPause.minutes(day, liveNow);
-  }
+  // Eine eigene Pause (>0) überschreibt die Regel; sonst gilt immer die Pausenregel.
+  const manual = Number(day.pause);
+  if(day.pause != null && day.pause !== "" && manual > 0) return manual;
+  const logged = (Array.isArray(day.dayPauses) && day.dayPauses.length && window.StundenzettelDayPause) ? StundenzettelDayPause.minutes(day, liveNow) : 0;
   const raw = rawWorkedMinutes(day, liveNow);
   if(raw<=0) return 0;
   const r = rulesOf();
   const base = holiday ? r.pause.holiday : r.pause[dayGroup(dateObj)];
-  if((raw - base) >= r.longThresholdHours*60) return r.longPauseMin;
-  return base;
+  const ruleMin = (raw - base) >= r.longThresholdHours*60 ? r.longPauseMin : base;
+  return Math.max(ruleMin, logged); // erfasste Pausen können die Regel nur verlängern, nie auf 0 drücken
 }
 
 function weekdayTarget(dateObj){
@@ -1447,17 +1448,26 @@ function doQuickSwitchTask(id){
   if(currentView==="auftraege") renderAuftraege();
 }
 
-function showMiniPlayerAlert(msg, kind){
+function showMiniPlayerAlert(msg, kind, onAck){
   if(!pipWindow) return;
   const el = pipWindow.document.getElementById("ppAlert");
   if(!el) return;
   el.textContent = msg;
   el.className = "pp-alert show "+(kind||"warn");
-  el.onclick = ()=>{ el.classList.remove("show"); };
+  if(onAck){
+    const b = pipWindow.document.createElement("button");
+    b.textContent = "Pause gemacht";
+    b.style.cssText = "display:block; width:100%; margin-top:6px;";
+    b.onclick = (ev)=>{ ev.stopPropagation(); onAck(); };
+    el.appendChild(b);
+    el.onclick = null;
+  } else {
+    el.onclick = ()=>{ el.classList.remove("show"); };
+  }
 }
 
 /* ---------------- Große, kaum zu übersehende Warnung (Pause/10h) ---------------- */
-function flashMiniPlayerBox(kind, durationMs){
+function flashMiniPlayerBox(kind, durationMs, sticky){
   if(!pipWindow) return;
   const body = pipWindow.document.body;
   if(!body) return;
@@ -1466,7 +1476,7 @@ function flashMiniPlayerBox(kind, durationMs){
   body.classList.add("pp-flash");
   clearTimeout(pipWindow.__flashTimer);
   const stop = ()=>{ body.classList.remove("pp-flash","danger"); body.onclick=null; };
-  body.onclick = stop; // Klick irgendwo im Mini-Player beendet das Blitzen sofort
+  body.onclick = sticky ? null : stop; // Normal: Klick beendet das Blitzen; Pausenwarnung nur per „Pause gemacht“
   pipWindow.__flashTimer = setTimeout(stop, durationMs||8000);
 }
 
@@ -1525,16 +1535,33 @@ function stopMiniPlayerPauseAlert(){
   if(alert) alert.classList.remove("show");
   if(body){ body.classList.remove("pp-flash","danger"); body.onclick=null; clearTimeout(pipWindow.__flashTimer); }
 }
-function firePauseAlert(msg){
-  const options=state.settings.pauseAlerts||{};
+let pendingPauseAlert = null;
+function ackPauseAlert(){
+  const p = pendingPauseAlert; if(!p) return;
+  pendingPauseAlert = null;
+  scheduledBreakState()[p.id] = Object.assign({}, scheduledBreakState()[p.id], {start:true, acknowledged:true});
+  stopMiniPlayerPauseAlert(); markDirty();
+}
+function showPendingPauseAlert(){
+  const p = pendingPauseAlert; if(!p || !pipWindow) return;
+  const now = new Date();
+  if(now.getHours()*60+now.getMinutes() >= p.endMin+60){ pendingPauseAlert = null; return; }
+  const el = pipWindow.document.getElementById("ppAlert");
+  if(el && !el.classList.contains("show")){ showMiniPlayerAlert(p.msg,"warn",ackPauseAlert); flashMiniPlayerBox("warn",3600000,true); }
+}
+function firePauseAlert(event){
+  const options = state.settings.pauseAlerts||{};
+  const msg = "☕ Pause: "+(event.item.label||"Pause")+" ("+event.item.start+"–"+event.item.end+")";
   if(options.miniPlayer){
-    showMiniPlayerAlert(msg,"warn"); flashMiniPlayerBox("warn",600000); playAlertSound(); flashPageTitle("☕ Pause!",15000);
+    pendingPauseAlert = {id:event.id, msg, endMin:timeToMin(event.item.end)};
+    showPendingPauseAlert(); playAlertSound();
   }
   if(options.browser) sendBrowserNotification("Stundenzettel — Pausenerinnerung",msg);
 }
 
 function renderMiniPlayer(){
   if(!pipWindow) return;
+  showPendingPauseAlert();
   const doc = pipWindow.document;
   const k = todayKey();
   const c = calcDay(k), metrics=todayMetrics();
@@ -1547,7 +1574,7 @@ function renderMiniPlayer(){
   const tLimit = metrics.ten;
   const tenHEl = doc.getElementById("ppTenH");
   if(tenHEl){
-    tenHEl.textContent = tLimit ? `${tLimit} · ${minToTime(metrics.remainingTen)}` : "–";
+    tenHEl.textContent = tLimit ? `${tLimit} · ${fmtDurMin(metrics.remainingTen)}` : "–";
     let cls = "v";
     if(tLimit){
       const nowStr = nowTimeStr();
@@ -1557,7 +1584,7 @@ function renderMiniPlayer(){
     tenHEl.className = cls;
   }
   const codeEl=doc.getElementById("ppCodeEnd");
-  if(codeEl){ codeEl.textContent=metrics.geht ? `${metrics.geht} · ${minToTime(metrics.remainingGeht)}` : "–"; codeEl.className="v"; }
+  if(codeEl){ codeEl.textContent=metrics.geht ? `${metrics.geht} · ${fmtDurMin(metrics.remainingGeht)}` : "–"; codeEl.className="v"; }
   const kBtn = doc.getElementById("ppKommen"); if(kBtn) kBtn.disabled = isDayOpen(d);
   const gBtn = doc.getElementById("ppGehen"); if(gBtn) gBtn.disabled = !isDayOpen(d);
   const fBtn = doc.getElementById("ppFeierabend"); if(fBtn) fBtn.disabled = !isDayOpen(d);
@@ -1660,7 +1687,7 @@ function renderHeuteAuftrag(){
   const active = state.tasks.find(t=>t.status==="in Arbeit");
   const pausing = state.tasks.find(t=>t.status==="Pause");
   const stoerToday = state.log.filter(l=>l.art==="stoerung" && localDateKeyFromIso(l.start)===todayKey()).reduce((sum,l)=>sum+StundenzettelTaskManagement.durationMinutes(l),0);
-  const stoerHint = stoerToday ? ` <span class="hint">· Störzeit heute: ${minToTime(stoerToday)}</span>` : "";
+  const stoerHint = stoerToday ? ` <span class="hint">· Störzeit heute: ${fmtDurMin(stoerToday)}</span>` : "";
   if(active){
     box.innerHTML = `<span class="badge ${active.kind==="stoerung"?"stoer":"on"}">${active.kind==="stoerung"?"Störung":"in Arbeit"}</span> <strong>${escapeHtml(active.orderNr||"(ohne Nr.)")}</strong> — ${escapeHtml(active.aenderung||"")}${stoerHint}`;
   } else if(pausing){
@@ -1684,7 +1711,7 @@ function timeDistribution(monthIdx){ // monthIdx: 0-11 oder null = ganzes Jahr
   });
   return res;
 }
-const fmtMin = m => minToTime(m);
+const fmtMin = m => fmtDurMin(m);
 function renderZeitverteilung(monthIdx, istHours){
   const box=document.getElementById("zeitverteilungMonat"); if(!box) return;
   const dist=timeDistribution(monthIdx);
@@ -1810,8 +1837,8 @@ function renderMonat(){
       <td>${WEEKDAY_LABELS[wk].slice(0,2)}</td>
       <td>${c.holiday?escapeHtml(c.holiday.label):""}</td>
       <td>${timesHtml}</td>
-      <td><input data-day="${k}" data-f="pause" placeholder="Min." value="${state.days[k]?.pause||""}" style="width:56px;"></td>
-      <td class="num">${minToTime(c.pauseMin)}</td>
+      <td><input data-day="${k}" data-f="pause" placeholder="H:MM" value="${Number(state.days[k]?.pause)>0?minToTime(Number(state.days[k].pause)):""}" style="width:56px;"></td>
+      <td class="num">${fmtDurMin(c.pauseMin)}</td>
       <td class="warnflag" title="${c.tenHourStatus==="overflow"?"Nettoarbeitszeit über 10 Stunden":""}">${c.tenHourStatus==="overflow"?"⚠ 10h":c.warn}</td>
       <td>${codeSelectHtml(k, state.days[k]?.code||"")}</td>
       <td><input class="wide" data-day="${k}" data-f="bemerkung" value="${String(state.days[k]?.bemerkung||"").replace(/"/g,'&quot;')}"></td>
@@ -1835,6 +1862,10 @@ function renderMonat(){
           toast(`Nicht eingetragen: Für ${fmtDateDE(dk)} ist kein Urlaub mehr verfügbar (Rest ${Math.max(0,before)} Tage).`,"warn");
           renderMonat(); return;
         }
+      } else if(f==="pause"){
+        const minutes = v.trim()==="" ? "" : parseDurationInput(v.trim());
+        if(minutes==null){ toast("Bitte Pause als H:MM eingeben, z. B. 0:45.","warn"); renderMonat(); return; }
+        day.pause = minutes;
       } else day[f]=v;
       markDirty(); renderMonat();
     });
@@ -2424,7 +2455,7 @@ function renderRunningTask(){
     box.innerHTML=`<h2>${isSt?"Aktuelle Störung":"Aktueller Auftrag"} <span class="badge ${isSt?"stoer":"on"}">${isSt?"Störung":"in Arbeit"}</span></h2>
       <div class="run-main"><div class="run-nr">${escapeHtml(t.orderNr||"(ohne Nr.)")}</div>
       <div class="run-meta">${isSt?(interrupted?"unterbricht Auftrag "+escapeHtml(interrupted.orderNr||"(ohne Nr.)"):"&nbsp;"):([t.modul,t.station,t.aenderung].filter(Boolean).map(escapeHtml).join(" · ")||"&nbsp;")}</div></div>
-      <div class="run-time"><span class="hint">Gesamt</span> <strong>${minToTime(totalTaskMinutes(t.id)+live)}</strong> <span class="hint">· seit Start ${live} Min.</span></div>
+      <div class="run-time"><span class="hint">Gesamt</span> <strong>${fmtDurMin(totalTaskMinutes(t.id)+live)}</strong> <span class="hint">· seit Start ${live} Min.</span></div>
       <div class="run-actions">${isSt?`<button data-run="stop" data-id="${t.id}" class="run-btn">⏹ Störung beenden</button>`:`<button data-run="stop" data-id="${t.id}" class="run-btn">⏸ Pause</button><button data-run="fertig" data-id="${t.id}" class="secondary fertig-btn run-btn">✔ Fertig</button>`}<button data-run="edit" data-id="${t.id}" class="secondary run-btn">Bearbeiten</button></div>`;
   }
   box.querySelectorAll("[data-run]").forEach(b=>b.onclick=()=>{
@@ -2514,7 +2545,7 @@ function renderAuftraege(){
         <td><input class="task-inline" data-task-id="${t.id}" data-task-field="orderNr" value="${escapeHtml(t.orderNr||"")}"></td>
         ${statusCell}
         <td class="num">${t.datum ? fmtDateDE(t.datum) : "–"}</td>
-        <td class="num">${minToTime(dauer)}</td>
+        <td class="num">${fmtDurMin(dauer)}</td>
         <td><input class="task-inline" type="text" inputmode="numeric" placeholder="H:MM" data-task-id="${t.id}" data-task-field="manualDurationOffsetMinutes" value="${formatOffsetHM(t.manualDurationOffsetMinutes)}"></td>
         <td>${t.status!=="fertig"?`<button class="secondary" data-act="fertig" data-id="${t.id}">ausblenden</button>`:""}</td>`;
       tbody.appendChild(tr); return;
@@ -2528,7 +2559,7 @@ function renderAuftraege(){
       <td><input class="task-inline" data-task-id="${t.id}" data-task-field="aenderung" value="${escapeHtml(t.aenderung||"")}"></td>
       <td><select class="task-inline" data-task-id="${t.id}" data-task-field="status"><option ${t.status==='warten'?'selected':''}>warten</option><option ${t.status==='in Arbeit'?'selected':''}>in Arbeit</option><option ${t.status==='Pause'?'selected':''}>Pause</option><option ${t.status==='fertig'?'selected':''}>fertig</option></select></td>
       <td class="num">${t.datum ? fmtDateDE(t.datum) : "–"}</td>
-      <td class="num">${minToTime(dauer)}</td>
+      <td class="num">${fmtDurMin(dauer)}</td>
       <td><input class="task-inline" type="text" inputmode="numeric" placeholder="H:MM" data-task-id="${t.id}" data-task-field="manualDurationOffsetMinutes" value="${formatOffsetHM(t.manualDurationOffsetMinutes)}"></td>
       <td>${t.status!=="fertig"?`<button class="secondary fertig-btn" data-act="fertig" data-id="${t.id}">fertig</button>`:""}</td>
     `;
@@ -2597,11 +2628,11 @@ function renderAuftraege(){
     const tr=document.createElement("tr");
     const durMin = Math.round((new Date(l.stop)-new Date(l.start))/60000);
     if(l.kind==="pause"){
-      tr.innerHTML = `<td>Pause</td><td>–</td><td>${escapeHtml(l.aenderung||"")}</td><td><input type="datetime-local" step="1" data-pause-date="${l.date}" data-pause-index="${l.pauseIndex}" data-pause-field="start" value="${localDateTimeInputFromIso(l.start)}"></td><td><input type="datetime-local" step="1" data-pause-date="${l.date}" data-pause-index="${l.pauseIndex}" data-pause-field="end" value="${localDateTimeInputFromIso(l.stop)}"></td><td class="num">${minToTime(durMin)}</td>`;
+      tr.innerHTML = `<td>Pause</td><td>–</td><td>${escapeHtml(l.aenderung||"")}</td><td><input type="datetime-local" step="1" data-pause-date="${l.date}" data-pause-index="${l.pauseIndex}" data-pause-field="start" value="${localDateTimeInputFromIso(l.start)}"></td><td><input type="datetime-local" step="1" data-pause-date="${l.date}" data-pause-index="${l.pauseIndex}" data-pause-field="end" value="${localDateTimeInputFromIso(l.stop)}"></td><td class="num">${fmtDurMin(durMin)}</td>`;
     } else {
       const index=Number(l.id.slice(4));
       tr.innerHTML = `<td>${l.art==="stoerung"?"Störung":"Auftrag"}</td><td>${escapeHtml(l.orderNr||"")}</td><td><input data-log-index="${index}" data-log-field="aenderung" value="${escapeHtml(l.aenderung||"")}"></td>
-        <td><input type="datetime-local" step="1" data-log-index="${index}" data-log-field="start" value="${localDateTimeInputFromIso(l.start)}"></td><td><input type="datetime-local" step="1" data-log-index="${index}" data-log-field="stop" value="${localDateTimeInputFromIso(l.stop)}"></td><td class="num">${minToTime(durMin)}</td>`;
+        <td><input type="datetime-local" step="1" data-log-index="${index}" data-log-field="start" value="${localDateTimeInputFromIso(l.start)}"></td><td><input type="datetime-local" step="1" data-log-index="${index}" data-log-field="stop" value="${localDateTimeInputFromIso(l.stop)}"></td><td class="num">${fmtDurMin(durMin)}</td>`;
     }
     ltbody.appendChild(tr);
   });
@@ -3098,16 +3129,6 @@ function checkTenHourLimit(){
   fireBigAlert(msg, overTen ? "danger" : "warn");
 }
 function scheduledBreakState(){ return state.ui.scheduledBreaks || (state.ui.scheduledBreaks={}); }
-function showScheduledPauseDialog(event){
-  const item=event.item, entry=scheduledBreakState()[event.id];
-  if(entry?.dialogOpen) return;
-  scheduledBreakState()[event.id]=Object.assign({},entry,{dialogOpen:true});
-  openModal(`<h2>Geplante Pause: ${escapeHtml(item.label||"Pause")}</h2><p class="hint">${escapeHtml(item.start)}–${escapeHtml(item.end)} wird gemäß deinen Regeln automatisch abgezogen. Die Bestätigung beendet nur die Mini-Player-Warnung.</p><div class="btnrow"><button id="scheduledPauseConfirm" class="go">Pause gemacht</button></div>`,true);
-  document.getElementById("scheduledPauseConfirm").onclick=()=>{
-    scheduledBreakState()[event.id]={start:true,acknowledged:true};
-    stopMiniPlayerPauseAlert(); markDirty(); closeModal();
-  };
-}
 function checkAutoStamps(){
   if(!dataLoaded) return;
   checkTenHourLimit();
@@ -3119,7 +3140,7 @@ function checkAutoStamps(){
   const due=window.StundenzettelTimeCore?.dueScheduledBreaks({date:k,nowMinutes:now.getHours()*60+now.getMinutes(),breaks:schedule,fired})||[];
   due.forEach(event=>{
     const entry=fired[event.id]||{};
-    if(event.type==="start"){ fired[event.id]=Object.assign({},entry,{start:true}); firePauseAlert("☕ Pause fällig: "+(event.item.label||"Pause")+"."); if(state.settings.pauseAlerts?.miniPlayer) showScheduledPauseDialog(event); }
+    if(event.type==="start"){ fired[event.id]=Object.assign({},entry,{start:true}); firePauseAlert(event); }
   });
 }
 function initAutoScheduler(){

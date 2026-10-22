@@ -1,5 +1,5 @@
 /* Offline-Zwischenspeicher für die installierte App. Nur über http://localhost oder https aktiv, nie bei file://. */
-const VERSION = "2026.10.22.2";
+const VERSION = "2026.10.22.3";
 const CACHE = `stundenzettel-v3-${VERSION}`;
 const FILES = [
  "./",
