@@ -29,9 +29,16 @@
     byId('epCustomAdd').onclick=()=>{ const date=byId('epCustomDate').value,name=byId('epCustomName').value.trim(),factor=Number(byId('epCustomFactor').value); if(!date||!name||!Number.isFinite(factor)){ctx.toast('Datum, Bezeichnung und Faktor sind erforderlich.','warn');return;} p.customHolidays.push({date,name,factor});ctx.markDirty();refresh();ctx.renderSettings();};
     refresh();
   }
-  const hmSigned = hours => { const sign = hours < 0 ? '−' : ''; const abs = Math.abs(hours); const mins = Math.round(abs * 60); return sign + Math.floor(mins / 60) + ':' + String(mins % 60).padStart(2, '0') + ' h'; };
+  let durationMode = 'decimal';
+  const hmSigned = hours => {
+    const mins = Math.round((Number(hours) || 0) * 60);
+    const core = browser.StundenzettelTimeCore;
+    const text = core ? core.formatDuration(Math.abs(mins), durationMode) : String(Math.abs(mins) / 60);
+    return (mins < 0 ? '−' : '') + text + ' h';
+  };
   function renderMonth(ctx, monthNumber, sums, opening) {
     const box=byId('monatAbschluss'); if(!box||!browser.ExcelParity)return;
+    durationMode=(ctx.state.ui&&ctx.state.ui.durationFormat)||'decimal';
     const adj=ctx.ensureMonthAdjust(monthNumber); if(adj.special==null)adj.special=''; if(adj.additionalHours==null)adj.additionalHours=0;
     const payout=n(adj.payout), diff=Math.round((sums.ist-sums.soll)*100)/100;
     const closing=browser.ExcelParity.monthlyClosingBalance({carryOver:opening,actual:sums.ist,target:sums.soll,payout,special:adj.special});
@@ -54,6 +61,7 @@
   }
   function renderCalculator(ctx) {
     const box=byId('rechnerBox'); if(!box||!browser.ExcelParity)return;
+    durationMode=(ctx.state.ui&&ctx.state.ui.durationFormat)||'decimal';
     const c=ensure(ctx.state).calculator; if(c.friday==null) c.friday=false;
     const rl=ctx.state.settings.rules; if(rl){ c.breakMoThu=rl.pause.moDo; c.breakFriday=rl.pause.fr; }
     box.innerHTML=`<div class="set-row"><div class="set-label"><strong>Kommt</strong><small>Arbeitsbeginn</small></div><div class="set-ctl calc-inline"><input id="epArrival" type="time" value="${c.arrival}"><button type="button" class="secondary" id="epArrivalToday">Heutiges Kommt</button></div></div>

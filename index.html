@@ -63,13 +63,6 @@
         <div id="monatLegend" class="code-legend"></div>
         <div class="tablewrap">
           <table id="monatTable">
-            <colgroup>
-              <col style="width:3.5%"><col style="width:6%"><col style="width:4%"><col style="width:8%">
-              <col style="width:20%">
-              <col style="width:6%"><col style="width:5%"><col style="width:2%">
-              <col style="width:9%"><col style="width:10%">
-              <col style="width:5.5%"><col style="width:5.5%"><col style="width:5.5%"><col style="width:5.5%">
-            </colgroup>
             <thead></thead>
             <tbody></tbody>
           </table>
@@ -283,9 +276,7 @@
       <h2>Pausen &amp; Kernzeit</h2>
       <div class="set-row stack"><div class="set-label"><strong>Je Tagesgruppe</strong><small>Pausenlänge, wenn keine eigene Pause eingetragen ist, und Kernzeit für die Geht-Empfehlung „K“.</small></div>
         <div class="set-ctl"><table class="rules-table" id="rulesTable"></table></div></div>
-      <div class="set-row"><div class="set-label"><strong>Pause an Feiertagen</strong><small>Gilt anstelle der Tagesgruppe, wenn der Tag ein Feiertag ist. Eingabe als H:MM.</small></div><div class="set-ctl unit"><input id="rPauseHoliday" placeholder="0:30"><span>H:MM</span></div></div>
-      <div class="set-row"><div class="set-label"><strong>Lange Pause ab Anwesenheit</strong><small>Ab dieser Netto-Zeit (Anwesenheit minus normale Pause) gilt die lange Pause.</small></div><div class="set-ctl unit"><input type="number" step="0.5" id="rLongHours"><span>h</span></div></div>
-      <div class="set-row"><div class="set-label"><strong>Länge der langen Pause</strong></div><div class="set-ctl unit"><input id="rLongPause" placeholder="0:45"><span>H:MM</span></div></div>
+      <div class="set-row"><div class="set-label"><strong>Pause an Feiertagen</strong><small>Gilt anstelle der Tagesgruppe, wenn der Tag ein Feiertag ist. Eingabe in Minuten.</small></div><div class="set-ctl unit"><input type="number" min="0" step="1" id="rPauseHoliday" placeholder="30"><span>Min.</span></div></div>
       <div class="set-row"><div class="set-label"><strong>Spätestes Arbeitsende</strong><small>Begrenzt die 9h-/10h-Zeiten und -Warnungen.</small></div><div class="set-ctl"><input type="time" id="rLatestEnd"></div></div>
       <div class="set-row stack"><div class="set-label"><strong>Feste Pausen</strong><small>Zu diesen Zeiten erinnert Stundenzettel und pausiert (bei aktivem automatischem Stempeln) den laufenden Auftrag.</small></div>
         <div class="set-ctl" id="rBreaksEditor"></div></div>

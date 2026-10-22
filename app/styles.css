@@ -134,11 +134,9 @@
 
   table,th,td,input,select,textarea,button,.kpi .v,.calc-table,table.compact-kv,.kv-row{font-family:var(--sans); font-variant-numeric:tabular-nums;}
   table{width:100%; border-collapse:collapse; font-size:13px;}
-  #monatTable{table-layout:fixed;}
+  #monatTable{table-layout:auto;}
   #monatTable{border:1px solid #bdb7a4;}
   #monatTable th,#monatTable td{border:1px solid #cfc9b6;}
-  #monatTable td{overflow:hidden;}
-  #monatTable td.wide-cell{overflow:visible;}
   th{
     font-weight:600; text-align:left; font-size:13px; color:var(--ink-soft);
     border-bottom:1px solid var(--line); padding:6px 5px; white-space:nowrap;
@@ -155,7 +153,7 @@
   .code-legend .swatch{width:11px; height:11px; border-radius:2px; border:1px solid rgba(0,0,0,.15); display:inline-block;}
   td input,td select{padding:3px 5px; width:76px;}
   td input.wide{width:100%; min-width:60px;}
-  td.num{font-family:var(--mono); text-align:right; white-space:nowrap;}
+  td.num{font-family:var(--mono); text-align:center; white-space:nowrap;}
   td.warnflag{color:var(--rust); font-weight:700; text-align:center;}
   .tablewrap{overflow:auto; max-height:74vh; border:1px solid var(--line); border-radius:var(--radius);}
   #view-monat .tablewrap,#view-jahr .tablewrap{overflow:visible;max-height:none;}
@@ -272,6 +270,7 @@
   .stamp-row .stamp-label{font-size:11px; color:var(--ink-soft); white-space:nowrap;}
   .stamp-row input[type="time"]{width:auto; padding:3px 5px;}
   input.auto-pending{border:2px solid var(--rust) !important; background:#fdf3f2;}
+  input.planned-geht{border:2px solid #2f6fd0 !important; background:#eaf2ff; color:#1d4f9c;}
   input.missing-stamp{border:2px solid var(--rust) !important; background:#fbe6e0;}
   .stamp-row .stamp-del{
     padding:2px 6px; font-size:11px; border:1px solid var(--line); background:#fff; color:var(--ink-soft);
@@ -477,3 +476,18 @@
   .files-actions{display:flex; flex-direction:column; gap:8px;}
   .files-actions button{width:100%; margin:0;}
   @media (max-width:640px){ .wiz-grid{grid-template-columns:1fr;} }
+
+  /* Datentabellen: Werte zentriert, Spaltenbreiten passen sich dem Inhalt an */
+  #monatTable,#jahrTable,#taskTable,#logTable,#feiertageTable,#jahrKalender,.compact-kv:not(.kv-label-left){table-layout:auto;}
+  #monatTable th,#monatTable td,#jahrTable th,#jahrTable td,#taskTable th,#taskTable td,#logTable th,#logTable td,#feiertageTable th,#feiertageTable td,
+  table.compact-kv th,table.compact-kv td.val,.calc-table td.v,.rules-table th,.rules-table td,.holiday-list th,.holiday-list td{text-align:center;}
+  #monatTable td:not(.wide-cell),#jahrTable td,#taskTable td,#logTable td{white-space:nowrap;}
+  #monatTable td input,#monatTable td select,#taskTable td input,#taskTable td select,#logTable td input,#rulesTable td input{text-align:center;}
+  #monatTable td input.wide{text-align:left;}
+  #monatTable td input[data-f="pause"]{width:64px;}
+  #monatTable td select{width:auto;min-width:64px;}
+  .times-wrap{min-width:0;}
+  .times-wrap .time-row.time-rows-stacked{align-items:center;}
+  .calc-table td.v input,.kv-row .v input{text-align:center;}
+  #monatTable td select{max-width:130px;}
+  #monatTable td input.wide{min-width:160px; width:100%;}

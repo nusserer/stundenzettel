@@ -34,6 +34,7 @@ function formatDurationHours(h){
 }
 function hoursToHM(h){ return formatDurationHours(h); }
 function formatOffsetHM(minutes){ return StundenzettelTimeCore.formatDuration(Number(minutes)||0,"hm"); }
+function parseMinutesInput(value){ const t=String(value==null?"":value).trim().replace(",","."); if(t==="") return ""; if(!/^\d+(\.\d+)?$/.test(t)) return null; return Math.round(Number(t)); }
 function fmtDurMin(m){ return m==null||isNaN(m) ? "" : formatDurationHours(m/60); }
 function parseDurationInput(value){ return window.StundenzettelTimeCore ? StundenzettelTimeCore.parseDuration(value) : null; }
 function round2(x){ return Math.round(x*100)/100; }
@@ -134,7 +135,6 @@ function computeHolidays(year){
 function defaultRules(){
   return {
     pause: {moDo:45, fr:30, sa:30, holiday:30},       // Minuten, wenn nicht anders eingetragen
-    longThresholdHours: 9, longPauseMin: 45,           // ab dieser Netto-Anwesenheit gilt die lange Pause
     latestEnd: "18:30",                                // spätestes Arbeitsende (für 9h/10h-Grenzen)
     kernzeit: {moDo:"14:15", fr:"14:15", sa:"14:15"},  // Geht-Empfehlung „zur Kernzeit“
     breaks: {                                          // feste Pausen für Erinnerung/Auto-Pause
@@ -749,32 +749,53 @@ function rawWorkedMinutes(day, liveNow){
   return total;
 }
 
+const LONG_PAUSE_AFTER_NET_MIN = 9*60, LONG_PAUSE_MIN = 45, SHORT_PAUSE_AFTER_NET_MIN = 6*60, SHORT_PAUSE_MIN = 30;
 function calcPauseMinutes(day, dateObj, holiday, liveNow){
-  // Eine eigene Pause (>0) überschreibt die Regel; sonst gilt immer die Pausenregel.
-  const manual = Number(day.pause);
-  if(day.pause != null && day.pause !== "" && manual > 0) return manual;
-  const logged = (Array.isArray(day.dayPauses) && day.dayPauses.length && window.StundenzettelDayPause) ? StundenzettelDayPause.minutes(day, liveNow) : 0;
   const raw = rawWorkedMinutes(day, liveNow);
   if(raw<=0) return 0;
   const r = rulesOf();
   const base = holiday ? r.pause.holiday : r.pause[dayGroup(dateObj)];
-  const ruleMin = (raw - base) >= r.longThresholdHours*60 ? r.longPauseMin : base;
-  return Math.max(ruleMin, logged); // erfasste Pausen können die Regel nur verlängern, nie auf 0 drücken
+  const manual = Number(day.pause);
+  const logged = (Array.isArray(day.dayPauses) && day.dayPauses.length && window.StundenzettelDayPause) ? StundenzettelDayPause.minutes(day, liveNow) : 0;
+  // Eine eigene Pause überschreibt immer alles, auch die lange Pause; 0 zählt als 0 (leer = Regel).
+  if(day.pause != null && String(day.pause).trim() !== "" && Number.isFinite(manual) && manual >= 0) return manual;
+  // Sonst Pausenregel: erfasste Pausen können sie nur verlängern, nie auf 0 drücken.
+  const pause = Math.max(base, logged);
+  // Feste gesetzliche Mindestpausen: ab 9 h Netto 45 Min., ab 6 h Netto 30 Min. (nicht einstellbar).
+  if((raw - pause) >= LONG_PAUSE_AFTER_NET_MIN) return Math.max(pause, LONG_PAUSE_MIN);
+  // Ab 6 h Netto gilt mindestens eine 30-Minuten-Pause.
+  if((raw - pause) >= SHORT_PAUSE_AFTER_NET_MIN) return Math.max(pause, SHORT_PAUSE_MIN);
+  return pause;
 }
 
 function weekdayTarget(dateObj){
   return state.settings.weekly[jsWeekdayKey(dateObj)] || 0;
 }
 
-function calcDay(k){
+/* Offener heutiger Tag in Summen (Monatsabschluss, Saldo): bis zur Geht-Empfehlung rechnen, außer die Uhrzeit ist schon später.
+   Beim Berechnen der Empfehlung selbst gilt die echte Uhrzeit (sonst Zirkelbezug). */
+let gehtProjectionBusy = false;
+function projectedLiveTime(day){
+  const now = nowTimeStr();
+  if(gehtProjectionBusy) return now;
+  gehtProjectionBusy = true;
+  try{
+    const rec = computeGehtEmpfehlungen(new Date().getMonth()).rows.find(x=>x.code===state.settings.gehtEmpfehlung.activeCode)?.time;
+    const last = (day.stamps||[])[ (day.stamps||[]).length-1 ];
+    if(rec && /^\d{2}:\d{2}$/.test(rec) && rec > now && (!last || rec > last)) return rec;
+  }catch(e){ /* Empfehlung nicht berechenbar: echte Uhrzeit */ }
+  finally{ gehtProjectionBusy = false; }
+  return now;
+}
+function calcDay(k, plainNow){
   const day = state.days[k] || {};
   const dateObj = keyToDate(k);
   const holiday = isHolidayOn(k);
-  const liveNow = (k===todayKey() && isDayOpen(day)) ? nowTimeStr() : null;
+  const liveNow = (k===todayKey() && isDayOpen(day)) ? (plainNow ? nowTimeStr() : projectedLiveTime(day)) : null;
   const raw = rawWorkedMinutes(day, liveNow);
   const pauseMin = calcPauseMinutes(day, dateObj, holiday, liveNow);
   const hasTimes = raw>0;
-  const ist = hasTimes ? Math.max(0,(raw-pauseMin))/60 : null;
+  const ist = hasTimes ? round2(Math.max(0,(raw-pauseMin))/60) : null; // wie Excel M4: Tages-IST auf 2 Dezimalstellen, damit Tages-, Monats- und Saldosummen identisch sind
   const wTarget = weekdayTarget(dateObj);
 
   // Wichtig (1:1 aus dem Original übernommen): ein Tag ohne jede Eintragung
@@ -1172,7 +1193,7 @@ function renderStempelList(k, day){
 }
 
 function renderHeuteKpis(k){
-  const c = calcDay(k);
+  const c = calcDay(k, true);
   const kpis = document.getElementById("heuteKpis");
   if(!kpis) return;
   const openBal = yearBalanceSeries().find(p=>p.date===k)?.bal;
@@ -1193,7 +1214,7 @@ function renderHeuteKpis(k){
   }
 }
 function todayMetrics(){
-  const k=todayKey(), c=calcDay(k), day=state.days[k]||{};
+  const k=todayKey(), c=calcDay(k, true), day=state.days[k]||{};
   const kommt=day.stamps?.[0]||"";
   const geht=computeGehtEmpfehlungen(new Date().getMonth()).rows.find(row=>row.code===state.settings.gehtEmpfehlung.activeCode)?.time||null;
   const ten=tenHourLimitTime();
@@ -1564,7 +1585,7 @@ function renderMiniPlayer(){
   showPendingPauseAlert();
   const doc = pipWindow.document;
   const k = todayKey();
-  const c = calcDay(k), metrics=todayMetrics();
+  const c = calcDay(k, true), metrics=todayMetrics();
   const d = ensureDay(k);
   const openBal = yearBalanceSeries().find(p=>p.date===k)?.bal;
   const setText = (id,val)=>{ const el=doc.getElementById(id); if(el) el.textContent=val; };
@@ -1756,10 +1777,14 @@ function buildTimesCellHTML(k, day){
   const autoIdx = day.autoIdx || [];
   const open = stamps.length % 2 === 1;
   const missingGeht = open && k < todayKey();
-  const ac = i => (autoIdx.includes(i) ? "auto-pending" : "") + (missingGeht && i===stamps.length ? " missing-stamp" : "");
+  // Heute offen: Geht-Empfehlung (bzw. aktuelle Uhrzeit, falls später) als markierten Vorschlag zeigen – wird nicht gespeichert.
+  const planned = (open && k === todayKey()) ? projectedLiveTime(day) : "";
+  const ac = i => (autoIdx.includes(i) ? "auto-pending" : "") + (missingGeht && i===stamps.length ? " missing-stamp" : "") + (planned && i===stamps.length ? " planned-geht" : "");
+  const val = i => (stamps[i] || (planned && i===stamps.length ? planned : ""));
+  const attr = i => (planned && i===stamps.length ? ` data-planned="${planned}" title="Vorschlag laut Geht-Empfehlung (nicht gestempelt)"` : "");
   const pairs=[];
   for(let i=0;i<Math.max(2,stamps.length);i+=2){
-    pairs.push(`<span class="time-pair"><input type="time" lang="de-DE" class="time-stamp ${ac(i)}" data-day="${k}" data-idx="${i}" value="${stamps[i]||""}"><span>–</span><input type="time" lang="de-DE" class="time-stamp ${ac(i+1)}" data-day="${k}" data-idx="${i+1}" value="${stamps[i+1]||""}"></span>`);
+    pairs.push(`<span class="time-pair"><input type="time" lang="de-DE" class="time-stamp ${ac(i)}" data-day="${k}" data-idx="${i}" value="${val(i)}"${attr(i)}><span>–</span><input type="time" lang="de-DE" class="time-stamp ${ac(i+1)}" data-day="${k}" data-idx="${i+1}" value="${val(i+1)}"${attr(i+1)}></span>`);
   }
   const html = `<div class="times-wrap" data-day="${k}"><div class="time-row time-rows-stacked">${pairs.map((p,idx)=>idx===pairs.length-1?`<span class="time-line-last">${p}<button type="button" class="time-add" data-day="${k}"${open?" disabled title=\"Bitte zuerst Geht eintragen\"":""}>+ Zeit</button></span>`:p).join('')}</div></div>`;
   return html;
@@ -1837,7 +1862,7 @@ function renderMonat(){
       <td>${WEEKDAY_LABELS[wk].slice(0,2)}</td>
       <td>${c.holiday?escapeHtml(c.holiday.label):""}</td>
       <td>${timesHtml}</td>
-      <td><input data-day="${k}" data-f="pause" placeholder="H:MM" value="${Number(state.days[k]?.pause)>0?minToTime(Number(state.days[k].pause)):""}" style="width:56px;"></td>
+      <td><input data-day="${k}" data-f="pause" placeholder="Min." value="${state.days[k]?.pause!=null && String(state.days[k].pause).trim()!=="" && Number.isFinite(Number(state.days[k].pause)) ? Number(state.days[k].pause) : ""}" style="width:56px;"></td>
       <td class="num">${fmtDurMin(c.pauseMin)}</td>
       <td class="warnflag" title="${c.tenHourStatus==="overflow"?"Nettoarbeitszeit über 10 Stunden":""}">${c.tenHourStatus==="overflow"?"⚠ 10h":c.warn}</td>
       <td>${codeSelectHtml(k, state.days[k]?.code||"")}</td>
@@ -1863,8 +1888,8 @@ function renderMonat(){
           renderMonat(); return;
         }
       } else if(f==="pause"){
-        const minutes = v.trim()==="" ? "" : parseDurationInput(v.trim());
-        if(minutes==null){ toast("Bitte Pause als H:MM eingeben, z. B. 0:45.","warn"); renderMonat(); return; }
+        const minutes = parseMinutesInput(v);
+        if(minutes==null){ toast("Bitte Pause in Minuten eingeben, z. B. 45.","warn"); renderMonat(); return; }
         day.pause = minutes;
       } else day[f]=v;
       markDirty(); renderMonat();
@@ -1875,8 +1900,9 @@ function renderMonat(){
       const dk=e.target.dataset.day, idx=Number(e.target.dataset.idx);
       const d=ensureDay(dk);
       const st=d.stamps;
-      while(st.length<=idx) st.push("");
       const val=e.target.value;
+      if(e.target.dataset.planned && val===e.target.dataset.planned && st[idx]===undefined) return; // unveränderter Vorschlag: nichts speichern
+      while(st.length<=idx) st.push("");
       const wasAuto = (d.autoIdx||[]).includes(idx);
       clearAutoStamp(d, idx);
       if(val===""){
@@ -2917,14 +2943,12 @@ function renderRulesEditor(){
   const r=rulesOf(), groups=["moDo","fr","sa"];
   const tbl=document.getElementById("rulesTable");
   tbl.innerHTML=`<thead><tr><th></th>${groups.map(g=>`<th>${GROUP_LABEL[g]}</th>`).join("")}</tr></thead><tbody>
-    <tr><td>Pause (H:MM)</td>${groups.map(g=>`<td><input data-r="pause" data-g="${g}" placeholder="0:30" value="${minToTime(r.pause[g])}"></td>`).join("")}</tr>
+    <tr><td>Pause (Min.)</td>${groups.map(g=>`<td><input type="number" min="0" step="1" data-r="pause" data-g="${g}" placeholder="30" value="${r.pause[g]}"></td>`).join("")}</tr>
     <tr><td>Kernzeit</td>${groups.map(g=>`<td><input type="time" data-r="kernzeit" data-g="${g}" value="${r.kernzeit[g]||""}"></td>`).join("")}</tr></tbody>`;
   tbl.querySelectorAll("input").forEach(el=>el.onchange=()=>{ const g=el.dataset.g;
-    if(el.dataset.r==="pause"){ const minutes=parseDurationInput(el.value); if(minutes==null){ toast("Bitte Dauer als H:MM eingeben, z. B. 0:30.","warn"); renderRulesEditor(); return; } r.pause[g]=minutes; } else r.kernzeit[g]=el.value; markDirty(); });
-  const bind=(id,fn,val,format)=>{ const el=document.getElementById(id); el.value=format?minToTime(val):val; el.onchange=()=>{ const value=format?parseDurationInput(el.value):el.value; if(value==null){ toast("Bitte Dauer als H:MM eingeben, z. B. 0:30.","warn"); renderRulesEditor(); return; } fn(value); markDirty(); }; };
+    if(el.dataset.r==="pause"){ const minutes=parseMinutesInput(el.value); if(minutes==null||minutes==="") { toast("Bitte Pause in Minuten eingeben, z. B. 30.","warn"); renderRulesEditor(); return; } r.pause[g]=minutes; } else r.kernzeit[g]=el.value; markDirty(); });
+  const bind=(id,fn,val,format)=>{ const el=document.getElementById(id); el.value=val; el.onchange=()=>{ const value=format?parseMinutesInput(el.value):el.value; if(value==null||value===""){ toast("Bitte Pause in Minuten eingeben, z. B. 30.","warn"); renderRulesEditor(); return; } fn(value); markDirty(); }; };
   bind("rPauseHoliday",v=>r.pause.holiday=v,r.pause.holiday,true);
-  bind("rLongHours",v=>r.longThresholdHours=Number(v)||0,r.longThresholdHours);
-  bind("rLongPause",v=>r.longPauseMin=v,r.longPauseMin,true);
   bind("rLatestEnd",v=>r.latestEnd=v||"18:30",r.latestEnd);
   const box=document.getElementById("rBreaksEditor");
   box.innerHTML=groups.map(g=>`<div class="breaks-group"><h4>${GROUP_LABEL[g]}</h4>${(r.breaks[g]||[]).map((b,i)=>`<div class="break-row"><input type="time" data-g="${g}" data-i="${i}" data-f="start" value="${b.start}"><span>–</span><input type="time" data-g="${g}" data-i="${i}" data-f="end" value="${b.end}"><input data-g="${g}" data-i="${i}" data-f="label" value="${escapeHtml(b.label||"")}" placeholder="Bezeichnung"><button type="button" class="secondary" data-del-g="${g}" data-del-i="${i}">✕</button></div>`).join("")||'<div class="hint">Keine festen Pausen.</div>'}<button type="button" class="secondary" data-add-g="${g}">+ Pause</button></div>`).join("");
@@ -3104,7 +3128,7 @@ function shiftLimitTime(hoursAfterKommtNetto){
   // die kürzere 30-Min-Pause (Fr/Sa/So/Feiertag) gilt nur UNTER 9h Netto. Da 9h und 10h
   // Zielmarken selbst schon bei/über 9h liegen, ist hier immer mit 45 Min zu rechnen.
   const rl = rulesOf();
-  const t = addMinutesToTimeStr(kommt, rl.longPauseMin + Math.round(hoursAfterKommtNetto*60));
+  const t = addMinutesToTimeStr(kommt, LONG_PAUSE_MIN + Math.round(hoursAfterKommtNetto*60));
   return (timeToMin(t) > timeToMin(rl.latestEnd)) ? rl.latestEnd : t;
 }
 function tenHourLimitTime(){ return shiftLimitTime(10); }
