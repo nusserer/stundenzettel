@@ -428,7 +428,7 @@ document.addEventListener("visibilitychange", ()=>{
 /* ---------------- Datei lesen / Daten übernehmen ---------------- */
 function confirmFindings(obj){
   if(!window.StundenzettelTimeCore) return true;
-  const findings = StundenzettelTimeCore.validateYearData(obj);
+  const findings = StundenzettelTimeCore.validateYearData(obj).filter(f=>f.kind!=="open-stamp"); // fehlendes Geht wird in der Monatsansicht rot markiert
   if(!findings.length) return true;
   const kindLabel = {"non-chronological":"nicht chronologisch","open-stamp":"offene Stempelung (ungerade Anzahl)","invalid-time":"ungültige Zeit","invalid-stamps":"kein Array"};
   const lines = findings.slice(0,10).map(f=>`• ${f.date}: ${kindLabel[f.kind]||f.kind}${f.stamps?" ["+f.stamps.join(", ")+"]":""}`);
@@ -1728,12 +1728,13 @@ function buildTimesCellHTML(k, day){
   const stamps = day.stamps || [];
   const autoIdx = day.autoIdx || [];
   const open = stamps.length % 2 === 1;
-  const ac = i => autoIdx.includes(i) ? "auto-pending" : "";
+  const missingGeht = open && k < todayKey();
+  const ac = i => (autoIdx.includes(i) ? "auto-pending" : "") + (missingGeht && i===stamps.length ? " missing-stamp" : "");
   const pairs=[];
   for(let i=0;i<Math.max(2,stamps.length);i+=2){
     pairs.push(`<span class="time-pair"><input type="time" lang="de-DE" class="time-stamp ${ac(i)}" data-day="${k}" data-idx="${i}" value="${stamps[i]||""}"><span>–</span><input type="time" lang="de-DE" class="time-stamp ${ac(i+1)}" data-day="${k}" data-idx="${i+1}" value="${stamps[i+1]||""}"></span>`);
   }
-  const html = `<div class="times-wrap" data-day="${k}"><div class="time-row time-rows-stacked">${pairs.join('')}<button type="button" class="time-add" data-day="${k}"${open?" disabled title=\"Bitte zuerst Geht eintragen\"":""}>+ Zeit</button></div></div>`;
+  const html = `<div class="times-wrap" data-day="${k}"><div class="time-row time-rows-stacked">${pairs.map((p,idx)=>idx===pairs.length-1?`<span class="time-line-last">${p}<button type="button" class="time-add" data-day="${k}"${open?" disabled title=\"Bitte zuerst Geht eintragen\"":""}>+ Zeit</button></span>`:p).join('')}</div></div>`;
   return html;
 }
 

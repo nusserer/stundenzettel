@@ -172,6 +172,7 @@
   .time-pair{display:inline-flex;align-items:center;gap:2px;white-space:nowrap;}
   .time-separator{padding:0 2px;color:var(--ink-soft);}
   .times-wrap .time-row.time-rows-stacked{flex-direction:column; align-items:flex-start; gap:3px;}
+  .times-wrap .time-line-last{display:inline-flex; align-items:center; gap:6px; white-space:nowrap;}
   tr.over-ten td{box-shadow:inset 0 -2px 0 var(--rust);}
   .holiday-list-wrap{margin-top:10px; max-height:40vh;}
   .holiday-list td{padding:6px 5px;}
@@ -269,6 +270,7 @@
   .stamp-row .stamp-label{font-size:11px; color:var(--ink-soft); white-space:nowrap;}
   .stamp-row input[type="time"]{width:auto; padding:3px 5px;}
   input.auto-pending{border:2px solid var(--rust) !important; background:#fdf3f2;}
+  input.missing-stamp{border:2px solid var(--rust) !important; background:#fbe6e0;}
   .stamp-row .stamp-del{
     padding:2px 6px; font-size:11px; border:1px solid var(--line); background:#fff; color:var(--ink-soft);
   }
