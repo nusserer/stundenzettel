@@ -778,13 +778,11 @@ let gehtProjectionBusy = false;
 function projectedLiveTime(day){
   const now = nowTimeStr();
   if(gehtProjectionBusy) return now;
-  gehtProjectionBusy = true;
   try{
     const rec = computeGehtEmpfehlungen(new Date().getMonth()).rows.find(x=>x.code===state.settings.gehtEmpfehlung.activeCode)?.time;
     const last = (day.stamps||[])[ (day.stamps||[]).length-1 ];
-    if(rec && /^\d{2}:\d{2}$/.test(rec) && rec > now && (!last || rec > last)) return rec;
+    if(rec && /^\d{2}:\d{2}$/.test(rec) && rec > now && (!last || rec > last)) return rec; // gilt für alle Codes, auch 10: ist die Uhrzeit später, zählt die Uhrzeit
   }catch(e){ /* Empfehlung nicht berechenbar: echte Uhrzeit */ }
-  finally{ gehtProjectionBusy = false; }
   return now;
 }
 function calcDay(k, plainNow){
@@ -956,6 +954,14 @@ function isCurrentRealMonth(monthIdx){
 
 /* ---- Geht-Empfehlung ("wann kann ich heute gehen") ---- */
 function computeGehtEmpfehlungen(monthIdx){
+  // Die Empfehlung wird immer mit der echten Uhrzeit für heute gerechnet (sonst Zirkelbezug: Empfehlung -> heutiger Saldo -> Empfehlung),
+  // damit Tabelle, Panel, Heute-Ansicht und Mini-Player denselben Wert zeigen.
+  const previous = gehtProjectionBusy;
+  gehtProjectionBusy = true;
+  try{ return computeGehtEmpfehlungenRaw(monthIdx); }
+  finally{ gehtProjectionBusy = previous; }
+}
+function computeGehtEmpfehlungenRaw(monthIdx){
   const g = state.settings.gehtEmpfehlung;
   const adj = ensureMonthAdjust(monthIdx+1);
   const today = new Date();
@@ -967,8 +973,14 @@ function computeGehtEmpfehlungen(monthIdx){
   const breakMin = holidayToday ? rl.pause.holiday : rl.pause[dayGroup(today)];
   const targetToday = weekdayTarget(today);
   const freeGoal = friSatSun ? g.freeGoalFr : g.freeGoalMoDo;
-  const weekBal = weekBalanceUpTo(today);
-  const monthBal = monthSums(monthIdx).diff;
+  // Wie im Excel-Original: Wochen- und Monatssaldo der Empfehlung gelten bis GESTERN (Jahresübersicht: WENN(Datum>=HEUTE();"";…)).
+  // Der heutige, mitlaufende Tag fließt nicht ein – dadurch bleibt die Empfehlung den ganzen Tag stabil.
+  let weekBal = 0;
+  for(let x=startOfISOWeek(today); dateKey(x)<tKey; x.setDate(x.getDate()+1)) weekBal += calcDay(dateKey(x), true).diff;
+  weekBal = round2(weekBal);
+  let monthBal = 0;
+  for(const key of monthRange(monthIdx)) if(key<tKey) monthBal += calcDay(key, true).diff;
+  monthBal = round2(monthBal);
   const remWeek = remainingWorkdaysInWeek(today);
   const remMonth = remainingWorkdaysInMonth(today, monthIdx);
   const wochenziel = adj.wochenziel || 0;
@@ -981,11 +993,10 @@ function computeGehtEmpfehlungen(monthIdx){
   // Kurzarbeit: Geht-Zeit(en), um auf den niedrigsten Gleitzeit-Stand der letzten 12 Monate zu kommen.
   const kaTarget = kaTargetForMonth(monthIdx);
   const todayOpeningBal = dayOpeningBalanceToday();
-  const todayAbsBalLive = yearBalanceSeries().find(p=>p.date===tKey)?.bal ?? todayOpeningBal;
   const desiredTodayDiffKA = round2(kaTarget - todayOpeningBal);
   const monatszielKA = kaTarget - monthOpeningBalance(monthIdx);
   const J44_KA = round2((monatszielKA - monthBal) / remMonth);
-  const weekOpeningBal = round2(todayAbsBalLive - weekBal);
+  const weekOpeningBal = round2(todayOpeningBal - weekBal);
   const wochenzielKA = kaTarget - weekOpeningBal;
   const J42_KA = round2((wochenzielKA - weekBal) / remWeek);
 
