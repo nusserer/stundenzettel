@@ -31,9 +31,11 @@
   }
   let durationMode = 'decimal';
   const hmSigned = hours => {
-    const mins = Math.round((Number(hours) || 0) * 60);
+    const h = Number(hours) || 0;
+    if (durationMode !== 'hm') { const v = Math.round(h * 100) / 100; return (v < 0 ? '−' : '') + Math.abs(v).toFixed(2).replace('.', ',') + ' h'; }
+    const mins = Math.round(h * 60);
     const core = browser.StundenzettelTimeCore;
-    const text = core ? core.formatDuration(Math.abs(mins), durationMode) : String(Math.abs(mins) / 60);
+    const text = core ? core.formatDuration(Math.abs(mins), 'hm') : String(Math.abs(mins) / 60);
     return (mins < 0 ? '−' : '') + text + ' h';
   };
   function renderMonth(ctx, monthNumber, sums, opening) {

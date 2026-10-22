@@ -30,6 +30,8 @@ function minToTime(m){ if(m==null) return ""; m=Math.round(m); const h=Math.floo
 function durationToMinutes(h){ return h==null || isNaN(h) ? null : Math.round(Number(h)*60); }
 function formatDurationHours(h){
   const minutes=durationToMinutes(h), mode=state?.ui?.durationFormat || "decimal";
+  // Dezimal direkt aus den Stunden runden (nicht über ganze Minuten), sonst wird z. B. 93,59 h als 93,58 angezeigt.
+  if(mode!=="hm" && h!=null && !isNaN(h)){ const v=Math.round(Number(h)*100)/100; return (v<0?"-":"")+Math.abs(v).toFixed(2).replace(".",","); }
   return window.StundenzettelTimeCore ? StundenzettelTimeCore.formatDuration(minutes,mode) : (minutes==null?"–":minToTime(minutes));
 }
 function hoursToHM(h){ return formatDurationHours(h); }
@@ -250,6 +252,7 @@ function normalizeState(s){
       day.stamps = st;
       delete day.k1; delete day.g1; delete day.k2; delete day.g2;
     }
+    trimTrailingEmptyStamps(day);
   }
   s.tasks = s.tasks || []; s.log = s.log || [];
   s.ui = s.ui || {};
@@ -429,7 +432,9 @@ document.addEventListener("visibilitychange", ()=>{
 /* ---------------- Datei lesen / Daten übernehmen ---------------- */
 function confirmFindings(obj){
   if(!window.StundenzettelTimeCore) return true;
-  const findings = StundenzettelTimeCore.validateYearData(obj).filter(f=>f.kind!=="open-stamp"); // fehlendes Geht wird in der Monatsansicht rot markiert
+  const findings = StundenzettelTimeCore.validateYearData(obj)
+    .filter(f=>f.kind!=="open-stamp") // fehlendes Geht wird in der Monatsansicht rot markiert
+    .filter(f=>!(f.kind==="invalid-time" && (f.stamps||[]).every(t=>t==="" || /^\d{2}:\d{2}$/.test(t)))); // nur leere Felder: werden beim Laden entfernt
   if(!findings.length) return true;
   const kindLabel = {"non-chronological":"nicht chronologisch","open-stamp":"offene Stempelung (ungerade Anzahl)","invalid-time":"ungültige Zeit","invalid-stamps":"kein Array"};
   const lines = findings.slice(0,10).map(f=>`• ${f.date}: ${kindLabel[f.kind]||f.kind}${f.stamps?" ["+f.stamps.join(", ")+"]":""}`);
@@ -768,6 +773,29 @@ function calcPauseMinutes(day, dateObj, holiday, liveNow){
   return pause;
 }
 
+/* Geht-Zeit, mit der heute genau `netHours` Netto-Arbeitszeit erreicht werden.
+   Pause exakt wie in calcDay: eigene Pause > Regel/erfasste Pausen > Mindestpausen (ab 6 h 30, ab 9 h 45 Min.).
+   Mehrere Kommt/Geht-Paare: bereits abgeschlossene Paare zählen mit, Lücken dazwischen nicht. */
+function gehtForNetHours(netHours){
+  const tk = todayKey(), day = state.days[tk] || {};
+  const st = (day.stamps || []).filter(Boolean);
+  if(!st.length || netHours == null || !Number.isFinite(netHours)) return null;
+  const open = st.length % 2 === 1;
+  const start = open ? st[st.length-1] : st[0];
+  const closedStamps = open ? st.slice(0,-1) : [];
+  const closed = rawWorkedMinutes({stamps:closedStamps}, null);
+  const net = Math.round(netHours*60), dateObj = keyToDate(tk), holiday = isHolidayOn(tk);
+  let pause = 0, geht = start;
+  for(let i=0; i<5; i++){
+    const offset = Math.max(0, net + pause - closed);
+    geht = addMinutesToTimeStr(start, offset);
+    const next = calcPauseMinutes(Object.assign({}, day, {stamps:[...closedStamps, start, geht]}), dateObj, holiday, null);
+    if(next === pause) break;
+    pause = next;
+  }
+  return geht;
+}
+
 function weekdayTarget(dateObj){
   return state.settings.weekly[jsWeekdayKey(dateObj)] || 0;
 }
@@ -970,7 +998,6 @@ function computeGehtEmpfehlungenRaw(monthIdx){
   const holidayToday = isHolidayOn(tKey);
   const friSatSun = isFriSatSun(today);
   const rl = rulesOf();
-  const breakMin = holidayToday ? rl.pause.holiday : rl.pause[dayGroup(today)];
   const targetToday = weekdayTarget(today);
   const freeGoal = friSatSun ? g.freeGoalFr : g.freeGoalMoDo;
   // Wie im Excel-Original: Wochen- und Monatssaldo der Empfehlung gelten bis GESTERN (Jahresübersicht: WENN(Datum>=HEUTE();"";…)).
@@ -987,7 +1014,13 @@ function computeGehtEmpfehlungenRaw(monthIdx){
   const monatsziel = adj.monatsziel || 0;
   const isFri = jsWeekdayKey(today)==="fr";
 
-  const J42 = round2((wochenziel - weekBal + ((g.activeCode==="WZF" && !isFri) ? g.friAdjustWZ : 0)) / remWeek);
+  // WZ: Wochenziel gleichmäßig auf alle Resttage inkl. Freitag verteilen.
+  const J42 = round2((wochenziel - weekBal) / remWeek);
+  // WZF: Freitag ist fest (Soll − X h). Mo–Do übernehmen das Wochenziel plus die X h, verteilt auf die Resttage OHNE Freitag.
+  const friDate = new Date(startOfISOWeek(today)); friDate.setDate(friDate.getDate()+4);
+  const friIsRestDay = !isFri && friDate > today && !state.days[dateKey(friDate)]?.code && !isHolidayOn(dateKey(friDate));
+  const remWeekWZF = Math.max(1, remWeek - (friIsRestDay ? 1 : 0));
+  const J42F = round2((wochenziel - weekBal + (friIsRestDay ? g.friAdjustWZ : 0)) / remWeekWZF);
   const J44 = round2((monatsziel - monthBal) / remMonth);
 
   // Kurzarbeit: Geht-Zeit(en), um auf den niedrigsten Gleitzeit-Stand der letzten 12 Monate zu kommen.
@@ -1000,10 +1033,8 @@ function computeGehtEmpfehlungenRaw(monthIdx){
   const wochenzielKA = kaTarget - weekOpeningBal;
   const J42_KA = round2((wochenzielKA - weekBal) / remWeek);
 
-  function fromKommt(extraHoursMin){
-    if(!kommt) return null;
-    return addMinutesToTimeStr(kommt, breakMin + Math.round(extraHoursMin*60));
-  }
+  // Geht = Kommt + Netto-Stunden + Pause; die Pause wird für genau diese Netto-Zeit nach den Tagesregeln bestimmt.
+  const fromKommt = netHours => kommt ? gehtForNetHours(netHours) : null;
 
   const rows = [
     {code:"O",  label:"Heute Geht ohne Minus", time: fromKommt(targetToday)},
@@ -1013,7 +1044,7 @@ function computeGehtEmpfehlungenRaw(monthIdx){
     {code:"W",  label:"Heute Geht nach Woche 0h", time: fromKommt(targetToday - weekBal)},
     {code:"WF", label:"Heute Geht nach Woche 0h / Freitag -Xh", time: friSatSun ? fromKommt(targetToday - g.friAdjustWeek) : fromKommt(targetToday - weekBal + g.friAdjustWeek)},
     {code:"WZ", label:"Heute Geht nach Wochenziel/Resttage", time: fromKommt(targetToday + J42)},
-    {code:"WZF",label:"Heute Geht nach Wochenziel/Resttage / Freitag -Xh", time: friSatSun ? fromKommt(targetToday - g.friAdjustWZ) : fromKommt(targetToday + J42)},
+    {code:"WZF",label:"Heute Geht nach Wochenziel/Resttage / Freitag -Xh", time: friSatSun ? fromKommt(targetToday - g.friAdjustWZ) : fromKommt(targetToday + J42F)},
     {code:"10", label:"Heute Geht nach 10h", time: shiftLimitTime(10)},
     {code:"M",  label:"Heute Geht nach Monat 0h", time: fromKommt(targetToday - monthBal)},
     {code:"MZ", label:"Heute Geht nach Monatsziel/Resttage", time: fromKommt(targetToday + J44)},
@@ -1021,7 +1052,7 @@ function computeGehtEmpfehlungenRaw(monthIdx){
     {code:"MKA",label:`Heute Geht für KA-Tiefststand (${hoursToHM(kaTarget)}) — Monats-Resttage`, time: fromKommt(targetToday + J44_KA)},
     {code:"WKA",label:`Heute Geht für KA-Tiefststand (${hoursToHM(kaTarget)}) — Wochen-Resttage`, time: fromKommt(targetToday + J42_KA)},
   ];
-  return {rows, J42, J44, weekBal, monthBal, remWeek, remMonth, kommt, kaTarget};
+  return {rows, J42, J42F, J44, weekBal, monthBal, remWeek, remWeekWZF, remMonth, kommt, kaTarget};
 }
 
 function glzTageVerfuegbar(){
@@ -1138,7 +1169,8 @@ function ensureDay(k){
   if(String(k).slice(0,4)!==String(state.settings.year)) return {stamps:[],pause:"",code:"",bemerkung:"",autoIdx:[]};
   if(!state.days[k]) state.days[k]={stamps:[],pause:"",code:"",bemerkung:"",autoIdx:[]}; if(!state.days[k].stamps) state.days[k].stamps=[]; if(!state.days[k].autoIdx) state.days[k].autoIdx=[]; return state.days[k]; }
 
-function isDayOpen(day){ return ((day&&day.stamps)||[]).length % 2 === 1; }
+function trimTrailingEmptyStamps(day){ const st=day&&day.stamps; if(!Array.isArray(st)) return day; while(st.length && !String(st[st.length-1]||"").trim()) st.pop(); return day; }
+function isDayOpen(day){ const st=((day&&day.stamps)||[]); let n=st.length; while(n && !String(st[n-1]||"").trim()) n--; return n % 2 === 1; }
 
 function renderStempelList(k, day){
   const box = document.getElementById("heuteStempelForm");
@@ -1293,6 +1325,7 @@ function doKommen(){
   if(!ensureTodayYear()) return;
   const k = todayKey();
   const d=ensureDay(k);
+  trimTrailingEmptyStamps(d);
   if(isDayOpen(d)){ toast("Es ist noch eine offene „Kommt“-Stempelung ohne „Geht“ vorhanden."); return; }
   const t = nowTimeStr(); // manuell: exakt jetzt, ohne Vorlauf
   d.stamps.push(t);
@@ -1303,6 +1336,7 @@ async function doGehen(feierabend){
   feierabend = feierabend===true; // Klick-Events (Objekte) zählen nicht als Feierabend
   const k = todayKey();
   const d=ensureDay(k);
+  trimTrailingEmptyStamps(d);
   if(!isDayOpen(d)){ toast("Bitte zuerst „Kommt“ stempeln.", "warn"); return; }
   // Zwischen-Geht: exakt jetzt. Feierabend: Nachlauf-Offset (Weg vom Platz zur Stempeluhr).
   const t = feierabend ? addMinutesToTimeStr(nowTimeStr(), state.settings.stempelOffsetGehenMin||0) : nowTimeStr();
@@ -1923,6 +1957,7 @@ function renderMonat(){
         if(st[idx]===val && !wasAuto) return;
         st[idx]=val;
       }
+      trimTrailingEmptyStamps(d);
       markDirty(); renderMonat(); renderMiniPlayer();
     });
   });
@@ -3118,7 +3153,8 @@ function autoStampKommenOnOpen(){
   if(wd==="sa"||wd==="so") return false;
   const k = dateKey(now);
   const d = ensureDay(k);
-  if(d.stamps.length>0) return false; // heute schon irgendeine Stempelung vorhanden
+  trimTrailingEmptyStamps(d);
+  if(d.stamps.some(t=>String(t||"").trim())) return false; // heute schon eine echte Stempelung vorhanden
   const t = addMinutesToTimeStr(nowTimeStr(), -(state.settings.stempelOffsetKommenMin||0));
   d.stamps.push(t);
   markAutoStamp(d, d.stamps.length-1);
@@ -3139,7 +3175,8 @@ function shiftLimitTime(hoursAfterKommtNetto){
   // die kürzere 30-Min-Pause (Fr/Sa/So/Feiertag) gilt nur UNTER 9h Netto. Da 9h und 10h
   // Zielmarken selbst schon bei/über 9h liegen, ist hier immer mit 45 Min zu rechnen.
   const rl = rulesOf();
-  const t = addMinutesToTimeStr(kommt, LONG_PAUSE_MIN + Math.round(hoursAfterKommtNetto*60));
+  const t = gehtForNetHours(hoursAfterKommtNetto);
+  if(!t) return null;
   return (timeToMin(t) > timeToMin(rl.latestEnd)) ? rl.latestEnd : t;
 }
 function tenHourLimitTime(){ return shiftLimitTime(10); }
