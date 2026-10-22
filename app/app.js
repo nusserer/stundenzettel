@@ -754,23 +754,30 @@ function rawWorkedMinutes(day, liveNow){
   return total;
 }
 
+// Gesetzliche Mindestpausen – nur für die rechtliche Prüfung („!“ in der Tabelle), nicht für die Berechnung.
 const LONG_PAUSE_AFTER_NET_MIN = 9*60, LONG_PAUSE_MIN = 45, SHORT_PAUSE_AFTER_NET_MIN = 6*60, SHORT_PAUSE_MIN = 30;
+/* Summe der Dauern der festen Pausen einer Tagesgruppe (z. B. Mo–Do 09:15–09:30 + 12:15–12:45 = 45 Min.). */
+function fixedBreakMinutes(dateObj){
+  return (rulesOf().breaks[dayGroup(dateObj)] || []).reduce((sum,b)=>{
+    const bs=timeToMin(b.start), be=timeToMin(b.end);
+    return sum + (bs!=null && be!=null && be>bs ? be-bs : 0);
+  }, 0);
+}
 function calcPauseMinutes(day, dateObj, holiday, liveNow){
   const raw = rawWorkedMinutes(day, liveNow);
   if(raw<=0) return 0;
   const r = rulesOf();
-  const base = holiday ? r.pause.holiday : r.pause[dayGroup(dateObj)];
+  // 1) Eigene Pause (Feld „Sonst.Pause“) überschreibt immer; 0 zählt als 0, leer = Standard.
   const manual = Number(day.pause);
-  const logged = (Array.isArray(day.dayPauses) && day.dayPauses.length && window.StundenzettelDayPause) ? StundenzettelDayPause.minutes(day, liveNow) : 0;
-  // Eine eigene Pause überschreibt immer alles, auch die lange Pause; 0 zählt als 0 (leer = Regel).
   if(day.pause != null && String(day.pause).trim() !== "" && Number.isFinite(manual) && manual >= 0) return manual;
-  // Sonst Pausenregel: erfasste Pausen können sie nur verlängern, nie auf 0 drücken.
-  const pause = Math.max(base, logged);
-  // Feste gesetzliche Mindestpausen: ab 9 h Netto 45 Min., ab 6 h Netto 30 Min. (nicht einstellbar).
-  if((raw - pause) >= LONG_PAUSE_AFTER_NET_MIN) return Math.max(pause, LONG_PAUSE_MIN);
-  // Ab 6 h Netto gilt mindestens eine 30-Minuten-Pause.
-  if((raw - pause) >= SHORT_PAUSE_AFTER_NET_MIN) return Math.max(pause, SHORT_PAUSE_MIN);
-  return pause;
+  // 2) Standard: Feiertag = Feiertagspause; sonst Dauer der festen Pausen der Tagesgruppe;
+  //    Tagesgruppe ohne feste Pausen (z. B. Sa/So) = Pausenlänge der Tagesgruppe.
+  //    Die gesetzlichen 6-h/9-h-Regeln fließen NICHT ein – sie dienen nur der Prüfung („!“).
+  const groupHasBreaks = (r.breaks[dayGroup(dateObj)] || []).length > 0;
+  const standard = holiday ? (Number(r.pause.holiday) || 0) : (groupHasBreaks ? fixedBreakMinutes(dateObj) : (Number(r.pause[dayGroup(dateObj)]) || 0));
+  // 3) Mit dem Pause-Button erfasste Tagespausen verlängern die Pause, wenn sie länger sind.
+  const logged = (Array.isArray(day.dayPauses) && day.dayPauses.length && window.StundenzettelDayPause) ? StundenzettelDayPause.minutes(day, liveNow) : 0;
+  return Math.min(raw, Math.max(standard, logged));
 }
 
 /* Geht-Zeit, mit der heute genau `netHours` Netto-Arbeitszeit erreicht werden.
@@ -860,8 +867,9 @@ function calcDay(k, plainNow){
   // legal break warning
   let warn = "";
   if(raw>0){
-    if(raw/60 >= 9 && pauseMin < 45) warn="!";
-    else if(raw/60 >= 6 && pauseMin < 30) warn="!";
+    const net = raw - pauseMin;
+    if(net >= LONG_PAUSE_AFTER_NET_MIN && pauseMin < LONG_PAUSE_MIN) warn="!";
+    else if(net >= SHORT_PAUSE_AFTER_NET_MIN && pauseMin < SHORT_PAUSE_MIN) warn="!";
   }
 
   const tenHourStatus = ist==null ? "none" : (ist>10 ? "overflow" : (ist>=9.5 ? "near" : "none"));
@@ -2989,7 +2997,7 @@ function renderRulesEditor(){
   const r=rulesOf(), groups=["moDo","fr","sa"];
   const tbl=document.getElementById("rulesTable");
   tbl.innerHTML=`<thead><tr><th></th>${groups.map(g=>`<th>${GROUP_LABEL[g]}</th>`).join("")}</tr></thead><tbody>
-    <tr><td>Pause (Min.)</td>${groups.map(g=>`<td><input type="number" min="0" step="1" data-r="pause" data-g="${g}" placeholder="30" value="${r.pause[g]}"></td>`).join("")}</tr>
+    <tr><td>Pause ohne feste Pausen (Min.)</td>${groups.map(g=>`<td><input type="number" min="0" step="1" data-r="pause" data-g="${g}" placeholder="30" value="${r.pause[g]}"></td>`).join("")}</tr>
     <tr><td>Kernzeit</td>${groups.map(g=>`<td><input type="time" data-r="kernzeit" data-g="${g}" value="${r.kernzeit[g]||""}"></td>`).join("")}</tr></tbody>`;
   tbl.querySelectorAll("input").forEach(el=>el.onchange=()=>{ const g=el.dataset.g;
     if(el.dataset.r==="pause"){ const minutes=parseMinutesInput(el.value); if(minutes==null||minutes==="") { toast("Bitte Pause in Minuten eingeben, z. B. 30.","warn"); renderRulesEditor(); return; } r.pause[g]=minutes; } else r.kernzeit[g]=el.value; markDirty(); });
