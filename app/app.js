@@ -1733,7 +1733,7 @@ function buildTimesCellHTML(k, day){
   for(let i=0;i<Math.max(2,stamps.length);i+=2){
     pairs.push(`<span class="time-pair"><input type="time" lang="de-DE" class="time-stamp ${ac(i)}" data-day="${k}" data-idx="${i}" value="${stamps[i]||""}"><span>–</span><input type="time" lang="de-DE" class="time-stamp ${ac(i+1)}" data-day="${k}" data-idx="${i+1}" value="${stamps[i+1]||""}"></span>`);
   }
-  const html = `<div class="times-wrap" data-day="${k}"><div class="time-row">${pairs.join('<span class="time-separator">·</span>')}<button type="button" class="time-add" data-day="${k}"${open?" disabled title=\"Bitte zuerst Geht eintragen\"":""}>+ Zeit</button></div></div>`;
+  const html = `<div class="times-wrap" data-day="${k}"><div class="time-row time-rows-stacked">${pairs.join('')}<button type="button" class="time-add" data-day="${k}"${open?" disabled title=\"Bitte zuerst Geht eintragen\"":""}>+ Zeit</button></div></div>`;
   return html;
 }
 
