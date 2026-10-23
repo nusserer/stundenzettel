@@ -897,9 +897,26 @@ function monthOpeningBalance(monthIdx){
    - „Auszahlen“ aktiv (monthAdjust.special): das Plus des Monats wird ausgezahlt, höchstens 30 h; der Rest bleibt auf dem Konto.
    - Zusätzlich kann eine manuell ausgezahlte Stundenzahl (monthAdjust.payout) eingetragen werden. */
 const MAX_MONTHLY_PAYOUT_HOURS = 30;
+/* Auszahlen/Ansammeln gilt ab dem Monat, in dem es gewählt wurde, für alle Folgemonate –
+   bis es in einem späteren Monat wieder umgestellt wird (monthAdjust.payoutMode = "on"/"off").
+   Ältere Stände: special = "x" bedeutete „Auszahlen“ in genau diesem Monat. */
+function payoutSetting(monthIdx){
+  for(let m=monthIdx; m>=0; m--){
+    const a = state.monthAdjust[m+1];
+    if(!a) continue;
+    if(a.payoutMode==="on" || a.payoutMode==="off") return {active:a.payoutMode==="on", fromMonth:m};
+    if(a.special!=null && a.special!=="") return {active:true, fromMonth:m};
+  }
+  return {active:false, fromMonth:null};
+}
+/* Ausgezahlter Anteil bei einem bisherigen Monatsplus `cumDiff`: bei Auszahlen das Plus bis 30 h – dadurch bleibt der Saldo
+   im Monat gleich, bis die 30 h überschritten werden; ein Minus wird nicht ausgeglichen. */
+function payoutForPlus(monthIdx, cumDiff){
+  return payoutSetting(monthIdx).active ? round2(Math.min(Math.max(cumDiff,0), MAX_MONTHLY_PAYOUT_HOURS)) : 0;
+}
 function monthPayoutInfo(monthIdx, monthDiff){
   const adj = state.monthAdjust[monthIdx+1] || {};
-  const auto = (adj.special != null && adj.special !== "") ? round2(Math.min(Math.max(monthDiff,0), MAX_MONTHLY_PAYOUT_HOURS)) : 0;
+  const auto = payoutForPlus(monthIdx, monthDiff);
   const manual = Number(adj.payout) || 0;
   return {auto, manual, total: round2(auto + manual)};
 }
@@ -920,14 +937,17 @@ function yearBalanceSeries(){
   const first = new Date(y,0,1), last=new Date(y,11,31);
   let bal = state.settings.glz.carryOverHours || 0;
   const pts=[];
-  let monthDiff = 0;
+  let monthStart = bal, monthDiff = 0;
   for(let d=new Date(first); d<=last; d.setDate(d.getDate()+1)){
-    const k=dateKey(d);
-    const diff = calcDay(k).diff;
-    bal = round2(bal + diff); monthDiff += diff;
-    // Am Monatsende die Auszahlung des Monats abziehen (wie der Monatsabschluss).
+    const k=dateKey(d), m=d.getMonth();
+    monthDiff = round2(monthDiff + calcDay(k).diff);
+    // Laufender Saldo: Plus wird bei „Auszahlen“ bis 30 h direkt verrechnet (Saldo bleibt im Monat gleich).
+    bal = round2(monthStart + monthDiff - payoutForPlus(m, monthDiff));
     const next = new Date(d); next.setDate(d.getDate()+1);
-    if(next.getMonth() !== d.getMonth()){ bal = round2(bal - monthPayoutInfo(d.getMonth(), round2(monthDiff)).total); monthDiff = 0; }
+    if(next.getMonth() !== m){
+      bal = round2(bal - monthPayoutInfo(m, monthDiff).manual); // manuelle Auszahlung am Monatsende
+      monthStart = bal; monthDiff = 0;
+    }
     pts.push({date:k, bal});
   }
   return pts;
@@ -1907,11 +1927,13 @@ function renderMonat(){
     <th>IST</th><th>SOLL</th><th>+/-</th><th>Saldo</th>
   </tr>`;
   tbody.innerHTML="";
-  let running = monthOpeningBalance(currentMonthIdx);
+  const monthOpening = monthOpeningBalance(currentMonthIdx);
+  let running = monthOpening, cumDiff = 0;
   const tk = todayKey();
   for(const k of keys){
     const c = calcDay(k);
-    running = round2(running + c.diff);
+    cumDiff = round2(cumDiff + c.diff);
+    running = round2(monthOpening + cumDiff - payoutForPlus(currentMonthIdx, cumDiff));
     const wk = jsWeekdayKey(c.dateObj);
     const tr=document.createElement("tr");
     let cls=[];
@@ -2018,7 +2040,7 @@ function renderMonat(){
   renderGehtPanel(currentMonthIdx);
   if(window.StundenzettelExcelViews){
     renderZeitverteilung(currentMonthIdx, sums.ist);
-    StundenzettelExcelViews.renderMonth({state, ensureMonthAdjust, markDirty, renderMonth: renderMonat, toast, monthDiff: monthDiffSum(currentMonthIdx), payoutInfo: monthPayoutInfo(currentMonthIdx, monthDiffSum(currentMonthIdx)), closing: monthClosingBalance(currentMonthIdx), maxPayout: MAX_MONTHLY_PAYOUT_HOURS}, currentMonthIdx+1, sums, monthOpeningBalance(currentMonthIdx));
+    StundenzettelExcelViews.renderMonth({state, ensureMonthAdjust, markDirty, renderMonth: renderMonat, toast, monthDiff: monthDiffSum(currentMonthIdx), payoutSetting: payoutSetting(currentMonthIdx), monthNames: MONTH_NAMES, payoutInfo: monthPayoutInfo(currentMonthIdx, monthDiffSum(currentMonthIdx)), closing: monthClosingBalance(currentMonthIdx), maxPayout: MAX_MONTHLY_PAYOUT_HOURS}, currentMonthIdx+1, sums, monthOpeningBalance(currentMonthIdx));
   }
 }
 
