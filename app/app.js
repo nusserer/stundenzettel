@@ -754,7 +754,7 @@ function rawWorkedMinutes(day, liveNow){
   return total;
 }
 
-// Gesetzliche Mindestpausen – nur für die rechtliche Prüfung („!“ in der Tabelle), nicht für die Berechnung.
+// Gesetzliche Mindestpausen: ab 6 h Netto 30 Min., ab 9 h Netto 45 Min. – werden automatisch abgezogen (eigene Pause überschreibt).
 const LONG_PAUSE_AFTER_NET_MIN = 9*60, LONG_PAUSE_MIN = 45, SHORT_PAUSE_AFTER_NET_MIN = 6*60, SHORT_PAUSE_MIN = 30;
 /* Summe der Dauern der festen Pausen einer Tagesgruppe (z. B. Mo–Do 09:15–09:30 + 12:15–12:45 = 45 Min.). */
 function fixedBreakMinutes(dateObj){
@@ -772,12 +772,16 @@ function calcPauseMinutes(day, dateObj, holiday, liveNow){
   if(day.pause != null && String(day.pause).trim() !== "" && Number.isFinite(manual) && manual >= 0) return manual;
   // 2) Standard: Feiertag = Feiertagspause; sonst Dauer der festen Pausen der Tagesgruppe;
   //    Tagesgruppe ohne feste Pausen (z. B. Sa/So) = Pausenlänge der Tagesgruppe.
-  //    Die gesetzlichen 6-h/9-h-Regeln fließen NICHT ein – sie dienen nur der Prüfung („!“).
   const groupHasBreaks = (r.breaks[dayGroup(dateObj)] || []).length > 0;
   const standard = holiday ? (Number(r.pause.holiday) || 0) : (groupHasBreaks ? fixedBreakMinutes(dateObj) : (Number(r.pause[dayGroup(dateObj)]) || 0));
   // 3) Mit dem Pause-Button erfasste Tagespausen verlängern die Pause, wenn sie länger sind.
   const logged = (Array.isArray(day.dayPauses) && day.dayPauses.length && window.StundenzettelDayPause) ? StundenzettelDayPause.minutes(day, liveNow) : 0;
-  return Math.min(raw, Math.max(standard, logged));
+  let pause = Math.max(standard, logged);
+  // 4) Gesetzliche Mindestpause wie im Excel: liegt die Netto-Zeit (Anwesenheit − Pause) bei 9 h oder mehr, gelten mindestens 45 Min.,
+  //    ab 6 h mindestens 30 Min. (z. B. Freitag 30 → 45 Min., sobald 9 h überschritten werden).
+  if(raw - pause >= LONG_PAUSE_AFTER_NET_MIN) pause = Math.max(pause, LONG_PAUSE_MIN);
+  else if(raw - pause >= SHORT_PAUSE_AFTER_NET_MIN) pause = Math.max(pause, SHORT_PAUSE_MIN);
+  return Math.min(raw, pause);
 }
 
 /* Geht-Zeit, mit der heute genau `netHours` Netto-Arbeitszeit erreicht werden.
@@ -889,13 +893,21 @@ function monthOpeningBalance(monthIdx){
   if(monthIdx===0) return state.settings.glz.carryOverHours || 0;
   return monthClosingBalance(monthIdx-1);
 }
+/* Überstunden-Auszahlung eines Monats:
+   - „Auszahlen“ aktiv (monthAdjust.special): das Plus des Monats wird ausgezahlt, höchstens 30 h; der Rest bleibt auf dem Konto.
+   - Zusätzlich kann eine manuell ausgezahlte Stundenzahl (monthAdjust.payout) eingetragen werden. */
+const MAX_MONTHLY_PAYOUT_HOURS = 30;
+function monthPayoutInfo(monthIdx, monthDiff){
+  const adj = state.monthAdjust[monthIdx+1] || {};
+  const auto = (adj.special != null && adj.special !== "") ? round2(Math.min(Math.max(monthDiff,0), MAX_MONTHLY_PAYOUT_HOURS)) : 0;
+  const manual = Number(adj.payout) || 0;
+  return {auto, manual, total: round2(auto + manual)};
+}
+function monthDiffSum(monthIdx){ let s=0; for(const k of monthRange(monthIdx)) s += calcDay(k).diff; return round2(s); }
 function monthClosingBalance(monthIdx){
   const opening = monthOpeningBalance(monthIdx);
-  const keys = monthRange(monthIdx);
-  let sumDiff=0;
-  for(const k of keys){ sumDiff += calcDay(k).diff; }
-  const payout = (state.monthAdjust[monthIdx+1] && state.monthAdjust[monthIdx+1].payout) || 0;
-  return round2(opening + sumDiff - payout);
+  const diff = monthDiffSum(monthIdx);
+  return round2(opening + diff - monthPayoutInfo(monthIdx, diff).total);
 }
 function monthSums(monthIdx){
   const keys = monthRange(monthIdx);
@@ -908,9 +920,14 @@ function yearBalanceSeries(){
   const first = new Date(y,0,1), last=new Date(y,11,31);
   let bal = state.settings.glz.carryOverHours || 0;
   const pts=[];
+  let monthDiff = 0;
   for(let d=new Date(first); d<=last; d.setDate(d.getDate()+1)){
     const k=dateKey(d);
-    bal = round2(bal + calcDay(k).diff);
+    const diff = calcDay(k).diff;
+    bal = round2(bal + diff); monthDiff += diff;
+    // Am Monatsende die Auszahlung des Monats abziehen (wie der Monatsabschluss).
+    const next = new Date(d); next.setDate(d.getDate()+1);
+    if(next.getMonth() !== d.getMonth()){ bal = round2(bal - monthPayoutInfo(d.getMonth(), round2(monthDiff)).total); monthDiff = 0; }
     pts.push({date:k, bal});
   }
   return pts;
@@ -2001,7 +2018,7 @@ function renderMonat(){
   renderGehtPanel(currentMonthIdx);
   if(window.StundenzettelExcelViews){
     renderZeitverteilung(currentMonthIdx, sums.ist);
-    StundenzettelExcelViews.renderMonth({state, ensureMonthAdjust, markDirty, renderMonth: renderMonat, toast}, currentMonthIdx+1, sums, monthOpeningBalance(currentMonthIdx));
+    StundenzettelExcelViews.renderMonth({state, ensureMonthAdjust, markDirty, renderMonth: renderMonat, toast, monthDiff: monthDiffSum(currentMonthIdx), payoutInfo: monthPayoutInfo(currentMonthIdx, monthDiffSum(currentMonthIdx)), closing: monthClosingBalance(currentMonthIdx), maxPayout: MAX_MONTHLY_PAYOUT_HOURS}, currentMonthIdx+1, sums, monthOpeningBalance(currentMonthIdx));
   }
 }
 

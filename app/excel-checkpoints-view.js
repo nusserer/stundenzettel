@@ -42,24 +42,22 @@
     const box=byId('monatAbschluss'); if(!box||!browser.ExcelParity)return;
     durationMode=(ctx.state.ui&&ctx.state.ui.durationFormat)||'decimal';
     const adj=ctx.ensureMonthAdjust(monthNumber); if(adj.special==null)adj.special=''; if(adj.additionalHours==null)adj.additionalHours=0;
-    const payout=n(adj.payout), diff=Math.round((sums.ist-sums.soll)*100)/100;
-    const closing=browser.ExcelParity.monthlyClosingBalance({carryOver:opening,actual:sums.ist,target:sums.soll,payout,special:adj.special});
-    const special=adj.special!=='';
+    const diff = ctx.monthDiff, pay = ctx.payoutInfo, closing = ctx.closing, max = ctx.maxPayout;
+    const auszahlen = adj.special !== '';
     box.innerHTML=`<h2>Monatsabschluss <small>so entsteht der Saldo am Monatsende</small></h2>
       <table class="calc-table"><tbody>
         <tr><td>Übertrag aus dem Vormonat</td><td class="v">${hmSigned(opening)}</td></tr>
         <tr><td>+ IST-Zeit <small>geleistete Arbeitszeit</small></td><td class="v">${hmSigned(sums.ist)}</td></tr>
         <tr><td>− SOLL-Zeit <small>Vorgabe für den Monat</small></td><td class="v">${hmSigned(sums.soll)}</td></tr>
-        <tr class="sub"><td>= Differenz im Monat</td><td class="v ${diff>=0?'pos':'neg'}">${hmSigned(diff)}</td></tr>
-        <tr><td><label for="mPayout">− Auszahlung <small>ausgezahlte Überstunden</small></label></td><td class="v"><input id="mPayout" type="number" step="0.1" value="${payout}"> h</td></tr>
-        <tr class="total"><td>= Saldo am Monatsende${special?' <small>(mit Sonderregel)</small>':''}</td><td class="v">${hmSigned(closing)}</td></tr>
+        <tr class="sub"><td>= Überstunden im Monat</td><td class="v ${diff>=0?'pos':'neg'}">${hmSigned(diff)}</td></tr>
+        <tr><td colspan="2"><label class="chk"><input type="checkbox" id="epSpecial" ${auszahlen?'checked':''}> Überstunden dieses Monats auszahlen <small>(höchstens ${max} h, der Rest wird angesammelt)</small></label></td></tr>
+        ${auszahlen?`<tr><td>− Auszahlung Monatsplus <small>${diff<=0?'kein Plus im Monat':(diff>max?'auf '+max+' h begrenzt, '+hmSigned(diff-max)+' werden angesammelt':'komplettes Plus')}</small></td><td class="v">${hmSigned(pay.auto)}</td></tr>`:''}
+        <tr><td><label for="mPayout">− Zusätzlich ausgezahlt <small>optional, z. B. Auszahlung vom Gleitzeitkonto</small></label></td><td class="v"><input id="mPayout" type="number" step="0.1" value="${pay.manual}"> h</td></tr>
+        <tr class="total"><td>= Übertrag in den nächsten Monat</td><td class="v">${hmSigned(closing)}</td></tr>
       </tbody></table>
-      <details class="calc-special" ${special?'open':''}><summary>Sonderregel „Zusätzliche Überstunden“ ${special?'· aktiv':''}</summary>
-        <p class="hint">Nur ausfüllen, wenn der Monat nach der Sonderregel abgeschlossen werden soll: Bei einem Plus im Monat bis 30 h werden die Mehrstunden nicht gutgeschrieben (Übertrag − Auszahlung), über 30 h werden 30 h abgezogen (Übertrag + Differenz − 30 h); bei einem Minus gilt Übertrag + Differenz. Leer = normaler Abschluss. Die Regel wirkt nur auf diese Anzeige, nicht auf den Übertrag in den Folgemonat.</p>
-        <div class="set-ctl unit"><input id="epSpecial" value="${escapeHtml(String(adj.special))}" placeholder="leer = normaler Abschluss"></div>
-      </details>`;
+      <p class="hint">Ohne Auszahlung werden die Überstunden komplett angesammelt. Mit Auszahlung wird das Plus dieses Monats bis ${max} h ausbezahlt; was darüber liegt, bleibt auf dem Gleitzeitkonto. Ein Minus wird immer vom Konto abgezogen.</p>`;
     byId('mPayout').onchange=e=>{adj.payout=n(e.target.value);ctx.markDirty();ctx.renderMonth();};
-    byId('epSpecial').onchange=e=>{adj.special=e.target.value.trim();ctx.markDirty();ctx.renderMonth();};
+    byId('epSpecial').onchange=e=>{adj.special=e.target.checked?'x':'';ctx.markDirty();ctx.renderMonth();};
   }
   function renderCalculator(ctx) {
     const box=byId('rechnerBox'); if(!box||!browser.ExcelParity)return;

@@ -491,3 +491,5 @@
   .calc-table td.v input,.kv-row .v input{text-align:center;}
   #monatTable td select{max-width:130px;}
   #monatTable td input.wide{min-width:160px; width:100%;}
+  .calc-special .special-rules{margin:6px 0 8px 18px; padding:0;}
+  .calc-special .special-rules li{margin:3px 0;}
