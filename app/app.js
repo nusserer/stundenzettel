@@ -1002,6 +1002,8 @@ function remainingWorkdaysInWeek(from){
     const wd=jsWeekdayKey(d);
     if(wd==="sa"||wd==="so") continue;
     if(state.days[dateKey(d)]?.code) continue; // schon verplanter Abwesenheitstag
+    const hol = isHolidayOn(dateKey(d));
+    if(hol && !Number(hol.factor)) continue;    // freier Feiertag ist kein Resttag
     n++;
   }
   return n||1;
@@ -1063,7 +1065,8 @@ function computeGehtEmpfehlungenRaw(monthIdx){
   const J42 = round2((wochenziel - weekBal) / remWeek);
   // WZF: Freitag ist fest (Soll − X h). Mo–Do übernehmen das Wochenziel plus die X h, verteilt auf die Resttage OHNE Freitag.
   const friDate = new Date(startOfISOWeek(today)); friDate.setDate(friDate.getDate()+4);
-  const friIsRestDay = !isFri && friDate > today && !state.days[dateKey(friDate)]?.code && !isHolidayOn(dateKey(friDate));
+  const friHol = isHolidayOn(dateKey(friDate));
+  const friIsRestDay = !isFri && friDate > today && !state.days[dateKey(friDate)]?.code && !(friHol && !Number(friHol.factor));
   const remWeekWZF = Math.max(1, remWeek - (friIsRestDay ? 1 : 0));
   const J42F = round2((wochenziel - weekBal + (friIsRestDay ? g.friAdjustWZ : 0)) / remWeekWZF);
   const J44 = round2((monatsziel - monthBal) / remMonth);
@@ -1809,17 +1812,63 @@ function renderHeuteAuftrag(){
 }
 
 /* ---------------- Zeitverteilung: Aufträge vs. Störungsarten ---------------- */
+/* Anwesenheits-Intervalle (ms) eines Tages laut Kommt/Geht; heute offen = bis jetzt. */
+function presenceIntervals(k){
+  const st=((state.days[k]||{}).stamps||[]).filter(t=>String(t||"").trim());
+  const [y,m,d]=k.split("-").map(Number), base=new Date(y,m-1,d).getTime(), out=[];
+  for(let i=0;i<st.length;i+=2){
+    const a=timeToMin(st[i]); if(a==null) continue;
+    let e = i+1<st.length ? timeToMin(st[i+1]) : (k===todayKey() ? timeToMin(nowTimeStr()) : null);
+    if(e==null) continue;
+    if(e<a) e+=1440; // über Mitternacht
+    out.push([base+a*60000, base+e*60000]);
+  }
+  return out;
+}
+/* Auftrags-/Störungszeit zählt nur, soweit sie in die gestempelte Anwesenheit fällt (vergessenes Pausieren über Nacht wird so nicht mitgezählt).
+   Das Zeitprotokoll selbst bleibt unverändert. Ergebnis je Tag: {dateKey: Minuten}. */
+function loggedPresenceMinutesByDay(l){
+  const s=new Date(l.start).getTime(), e=new Date(l.stop).getTime(), res={};
+  if(!Number.isFinite(s) || !Number.isFinite(e) || e<=s) return res;
+  const first=new Date(s); first.setHours(0,0,0,0); first.setDate(first.getDate()-1); // Vortag wegen Nachtschicht
+  for(let d=new Date(first); d.getTime()<=e; d.setDate(d.getDate()+1)){
+    const k=dateKey(d); if(!state.days[k]) continue;
+    let min=0;
+    for(const [a,b] of presenceIntervals(k)) min += Math.max(0, Math.min(b,e) - Math.max(a,s));
+    if(min>0) res[k]=(res[k]||0)+Math.round(min/60000);
+  }
+  return res;
+}
 function timeDistribution(monthIdx){ // monthIdx: 0-11 oder null = ganzes Jahr
-  const res={auftrag:0, stoer:{}, total:0};
+  const res={auftrag:0, auftraege:{}, stoer:{}, total:0};
+  const yearPrefix=String(state.settings.year)+"-";
+  const perDay={}; // dateKey -> [{art,name,min}]
   (state.log||[]).forEach(l=>{
-    const d=new Date(l.start); if(Number.isNaN(d.getTime())) return;
-    if(d.getFullYear()!==state.settings.year) return;
-    if(monthIdx!=null && d.getMonth()!==monthIdx) return;
-    const min=StundenzettelTaskManagement.durationMinutes(l);
-    if(l.art==="stoerung"){ const name=l.orderNr||"Störung"; res.stoer[name]=(res.stoer[name]||0)+min; }
-    else res.auftrag+=min;
-    res.total+=min;
+    const s=new Date(l.start), e=new Date(l.stop);
+    if(Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return;
+    if(e.getFullYear()<state.settings.year || s.getFullYear()>state.settings.year) return;
+    for(const [k,v] of Object.entries(loggedPresenceMinutesByDay(l))){
+      if(!k.startsWith(yearPrefix)) continue;
+      if(monthIdx!=null && Number(k.slice(5,7))-1!==monthIdx) continue;
+      (perDay[k]=perDay[k]||[]).push({art:l.art, name:l.orderNr, min:v});
+    }
   });
+  // Je Tag höchstens die IST-Zeit verteilen: überlappende Einträge (zwei gleichzeitig laufende Aufträge)
+  // und Pausen, in denen ein Auftrag weiterlief, werden anteilig gekürzt.
+  for(const [k,items] of Object.entries(perDay)){
+    const sum=items.reduce((t,x)=>t+x.min,0);
+    const istMin=Math.round((calcDay(k,true).ist||0)*60);
+    const f = sum>istMin && sum>0 ? istMin/sum : 1;
+    for(const x of items){
+      const min=x.min*f;
+      if(x.art==="stoerung"){ const name=x.name||"Störung"; res.stoer[name]=(res.stoer[name]||0)+min; }
+      else { res.auftrag+=min; const name=x.name||"(ohne Nr.)"; res.auftraege[name]=(res.auftraege[name]||0)+min; }
+      res.total+=min;
+    }
+  }
+  const r=v=>Math.round(v);
+  res.auftrag=r(res.auftrag); res.total=r(res.total);
+  for(const o of [res.auftraege,res.stoer]) for(const n in o) o[n]=r(o[n]);
   return res;
 }
 const fmtMin = m => fmtDurMin(m);
@@ -1828,14 +1877,14 @@ function renderZeitverteilung(monthIdx, istHours){
   const dist=timeDistribution(monthIdx);
   const ist=Math.round((istHours||0)*60);
   const pct=m=>ist>0?Math.round(m/ist*100)+" %":"–";
-  const rows=Object.entries(dist.stoer).sort((x,y)=>y[1]-x[1]);
-  const stoerSum=rows.reduce((s,[,m])=>s+m,0);
+  const orders=Object.entries(dist.auftraege).sort((x,y)=>y[1]-x[1]);
+  const stoerSum=Object.values(dist.stoer).reduce((s,m)=>s+m,0);
   const unassigned=Math.max(0,ist-dist.total);
   box.innerHTML=`<h2>Zeitverteilung <small>Anteil an der IST-Zeit des Monats</small></h2>
     <table class="compact-kv"><tbody>
-      <tr><td class="lbl">Aufträge</td><td class="val">${fmtMin(dist.auftrag)}</td><td class="val">${pct(dist.auftrag)}</td></tr>
+      <tr><td class="lbl">Aufträge gesamt</td><td class="val">${fmtMin(dist.auftrag)}</td><td class="val">${pct(dist.auftrag)}</td></tr>
+      ${orders.map(([n,m])=>`<tr><td class="lbl" style="padding-left:22px;font-weight:400;">${escapeHtml(n)}</td><td class="val">${fmtMin(m)}</td><td class="val">${pct(m)}</td></tr>`).join("")}
       <tr><td class="lbl">⚡ Störungen gesamt</td><td class="val">${fmtMin(stoerSum)}</td><td class="val">${pct(stoerSum)}</td></tr>
-      ${rows.map(([n,m])=>`<tr><td class="lbl" style="padding-left:22px;font-weight:400;">${escapeHtml(n)}</td><td class="val">${fmtMin(m)}</td><td class="val">${pct(m)}</td></tr>`).join("")}
       <tr><td class="lbl">Nicht zugeordnet</td><td class="val">${fmtMin(unassigned)}</td><td class="val">${pct(unassigned)}</td></tr>
       <tr><td class="lbl">IST laut Stempeluhr</td><td class="val">${fmtMin(ist)}</td><td class="val"></td></tr>
     </tbody></table>`;
@@ -1922,7 +1971,7 @@ function renderMonat(){
   thead.innerHTML = `<tr>
     <th>KW</th><th>Datum</th><th>Tag</th><th>Feiertag</th>
     <th>Kommt/Geht</th>
-    <th>Sonst.Pause</th><th>Pause</th><th></th>
+    <th>Pause (Min.)</th>
     <th>Code</th><th>Bemerkung</th>
     <th>IST</th><th>SOLL</th><th>+/-</th><th>Saldo</th>
   </tr>`;
@@ -1954,9 +2003,7 @@ function renderMonat(){
       <td>${WEEKDAY_LABELS[wk].slice(0,2)}</td>
       <td>${c.holiday?escapeHtml(c.holiday.label):""}</td>
       <td>${timesHtml}</td>
-      <td><input data-day="${k}" data-f="pause" placeholder="Min." value="${state.days[k]?.pause!=null && String(state.days[k].pause).trim()!=="" && Number.isFinite(Number(state.days[k].pause)) ? Number(state.days[k].pause) : ""}" style="width:56px;"></td>
-      <td class="num">${fmtDurMin(c.pauseMin)}</td>
-      <td class="warnflag" title="${c.tenHourStatus==="overflow"?"Nettoarbeitszeit über 10 Stunden":""}">${c.tenHourStatus==="overflow"?"⚠ 10h":c.warn}</td>
+      <td><div class="month-pause"><input inputmode="numeric" data-day="${k}" data-f="pause" aria-label="Pause in Minuten am ${fmtDateDE(k)}; leer = automatisch" title="Berechnete Pause: ${c.pauseMin} Min. · Eigene Eingabe überschreibt; leeren stellt die Automatik wieder her." placeholder="${c.pauseMin}" value="${state.days[k]?.pause!=null && String(state.days[k].pause).trim()!=="" && Number.isFinite(Number(state.days[k].pause)) ? Number(state.days[k].pause) : ""}">${c.warn?'<span class="warnflag" title="Gesetzlich zu kurze Pause" aria-label="Gesetzlich zu kurze Pause">!</span>':""}${c.tenHourStatus==="overflow"?'<span class="warnflag" title="Nettoarbeitszeit über 10 Stunden" aria-label="Nettoarbeitszeit über 10 Stunden">⚠ 10h</span>':""}</div></td>
       <td>${codeSelectHtml(k, state.days[k]?.code||"")}</td>
       <td><input class="wide" data-day="${k}" data-f="bemerkung" value="${String(state.days[k]?.bemerkung||"").replace(/"/g,'&quot;')}"></td>
       <td class="num">${c.ist==null?"":hoursToHM(c.ist)}</td>
@@ -2065,39 +2112,35 @@ function countCode(monthIdx, code){
   return monthRange(monthIdx).filter(k=>state.days[k]?.code===code).length;
 }
 function renderMonatKennzahlen(monthIdx, sums){
-  const monthNum = monthIdx+1;
-  const adj = ensureMonthAdjust(monthNum);
   const krank = countCode(monthIdx,"K");
   const urlaub = countCode(monthIdx,"U") + countCode(monthIdx,"UH")*0.5;
   const glzTage = countCode(monthIdx,"GLZ");
   const anwesenheit = monthRange(monthIdx).filter(k=>calcDay(k).ist!=null).length;
-  const vac = vacationUsed();
   const vacAvail = vacationInfo().avail;
-  const weekBal = isCurrentRealMonth(monthIdx) ? weekBalanceUpTo(new Date()) : null;
-  const kaTarget = kaTargetForMonth(monthIdx);
+  // Wochen-/Monatssaldo (Summe +/-) jeweils mit und ohne heute; heute zählt wie in der Tabelle (bis zur Geht-Empfehlung).
+  const isNowMonth = isCurrentRealMonth(monthIdx), tk = todayKey();
+  let wkIncl=0, wkExcl=0, moIncl=0, moExcl=0;
+  if(isNowMonth){
+    for(let x=startOfISOWeek(new Date()); dateKey(x)<=tk; x.setDate(x.getDate()+1)){ const k=dateKey(x), d=calcDay(k).diff; wkIncl+=d; if(k<tk) wkExcl+=d; }
+    for(const k of monthRange(monthIdx)){ if(k>tk) continue; const d=calcDay(k).diff; moIncl+=d; if(k<tk) moExcl+=d; }
+  }
+  const bal = v => isNowMonth ? hoursToHM(round2(v)) : "–";
 
   const tbl = document.getElementById("monatKennzahlenTable");
-  const kv=(label,value)=>`<div class="kv-row"><span>${label}</span><span class="v">${value}</span></div>`;
-  const kvIn=(label,id,value,unit)=>`<div class="kv-row"><label for="${id}">${label}</label><span class="v"><input type="number" step="0.1" id="${id}" value="${value}"> ${unit}</span></div>`;
+  const stat=(label,value)=>`<div class="month-stat"><span>${label}</span><strong>${value}</strong></div>`;
   tbl.innerHTML =
-    `<div class="kv-card"><h3>Anwesenheit &amp; Abwesenheit</h3>
-      ${kv("Anwesenheitstage", anwesenheit)}
-      ${kv("Krank (K)", krank+" Tage")}
-      ${kv("Urlaub in diesem Monat", urlaub+" Tage")}
-      ${kv("Urlaub noch verfügbar", vacAvail+" Tage")}
-      ${kv("GLZ-Tage genommen", glzTage)}
-      ${kv("GLZ-Tage noch verfügbar", glzTageVerfuegbar())}
+    `<div class="month-stats">
+      ${stat("Anwesenheitstage", anwesenheit)}
+      ${stat("Krank (K)", krank+" Tage")}
+      ${stat("Urlaub im Monat", urlaub+" Tage")}
+      ${stat("Urlaub verfügbar", vacAvail+" Tage")}
+      ${stat("GLZ genommen", glzTage+" Tage")}
+      ${stat("GLZ verfügbar", String(glzTageVerfuegbar()).replace(".",",")+" Tage")}
     </div>
-    <div class="kv-card"><h3>Wochensaldo &amp; Ziele</h3>
-      ${kv("Saldo aktuelle Woche", weekBal==null?"nur im laufenden Monat":hoursToHM(weekBal))}
-      ${kvIn("Wochenziel","mWochenziel",adj.wochenziel||0,"h")}
-      ${kvIn("Monatsziel","mMonatsziel",adj.monatsziel||0,"h")}
-      ${kvIn("Kurzarbeit: Zielstand (niedrigster Stand der letzten 12 Monate)","mKaTarget",kaTarget,"h")}
-    </div>`;
-
-  document.getElementById("mWochenziel").onchange=(e)=>{ ensureMonthAdjust(monthNum).wochenziel=Number(e.target.value)||0; markDirty(); renderMonat(); };
-  document.getElementById("mMonatsziel").onchange=(e)=>{ ensureMonthAdjust(monthNum).monatsziel=Number(e.target.value)||0; markDirty(); renderMonat(); };
-  document.getElementById("mKaTarget").onchange=(e)=>{ ensureMonthAdjust(monthNum).kaTarget=Number(e.target.value)||0; markDirty(); renderMonat(); };
+    <table class="month-balances"><caption>Saldo in ${state.ui.durationFormat==="hm"?"H:MM":"Stunden"}</caption><thead><tr><th scope="col"></th><th scope="col">inkl. heute</th><th scope="col">ohne heute</th></tr></thead>
+      <tbody><tr><th scope="row">Woche</th><td>${bal(wkIncl)}</td><td>${bal(wkExcl)}</td></tr>
+      <tr><th scope="row">Monat</th><td>${bal(moIncl)}</td><td>${bal(moExcl)}</td></tr></tbody></table>
+    ${isNowMonth?"":'<p class="hint">Wochen-/Monatssaldo mit und ohne heute nur im laufenden Monat.</p>'}`;
 }
 
 function applyWishGehtTime(wish){
@@ -2114,7 +2157,7 @@ function applyWishGehtTime(wish){
 function renderGehtPanel(monthIdx){
   const sub = document.getElementById("gehtPanelSub");
   const isNow = isCurrentRealMonth(monthIdx);
-  sub.textContent = isNow ? "(bezieht sich immer auf das heutige Datum)" : "— nur im aktuell laufenden Monat berechenbar, dieser Monat ist nicht der aktuelle";
+  sub.textContent = isNow ? "" : "— nur im laufenden Monat";
   const tbody = document.querySelector("#gehtTable tbody");
   const activeBox = document.getElementById("gehtActive");
   tbody.innerHTML=""; activeBox.innerHTML="";
@@ -2128,31 +2171,33 @@ function renderGehtPanel(monthIdx){
       activeBox.innerHTML = `<span class="hint">Noch kein „Kommt“ für heute eingetragen — Geht-Empfehlung erst danach berechenbar.</span>`;
     } else {
       const active = r.rows.find(x=>x.code===g.activeCode);
-      activeBox.innerHTML = `<span class="badge on" style="font-size:13px; padding:4px 10px;">Aktiv: ${g.activeCode}</span>
-        <strong style="font-family:var(--mono); font-size:18px; margin-left:8px;">${active?.time || "–"}</strong>
-        <span class="hint" style="margin-left:8px;">${active?.label||""}</span>
-        <select id="gActiveCode" style="width:auto; display:inline-block; margin-left:14px;">
-          ${r.rows.map(x=>`<option value="${x.code}" ${x.code===g.activeCode?"selected":""}>${x.code}</option>`).join("")}
-        </select>`;
-      document.getElementById("gActiveCode").onchange=(e)=>{ g.activeCode=e.target.value; markDirty(); renderMonat(); };
+      activeBox.innerHTML = `<div class="month-geht-active"><div><strong>${active?.time || "–"}</strong><span>Code ${escapeHtml(g.activeCode)} · ${escapeHtml(active?.label||"")}</span></div><span class="badge on">aktiv</span></div>`;
     }
     r.rows.forEach(row=>{
       const tr=document.createElement("tr");
       if(row.code===g.activeCode) tr.style.background="#fdf2df";
-      tr.innerHTML = `<td class="num">${row.code}</td><td>${escapeHtml(row.label)}</td><td class="num">${row.time||"–"}</td>`;
+      tr.innerHTML = `<td class="num"><button type="button" class="geht-code-choice" aria-pressed="${row.code===g.activeCode}" title="Code ${row.code} wählen">${row.code}</button></td><td>${escapeHtml(row.label)}</td><td class="num">${row.time||"–"}</td>`;
+      tr.querySelector("button").onclick=()=>{ g.activeCode=row.code; markDirty(); renderMonat(); };
       tbody.appendChild(tr);
     });
   }
 
+  const adj = ensureMonthAdjust(monthIdx+1);
+  document.getElementById("mWochenziel").value = adj.wochenziel||0;
+  document.getElementById("mMonatsziel").value = adj.monatsziel||0;
+  document.getElementById("mKaTarget").value = kaTargetForMonth(monthIdx);
+  document.getElementById("mWochenziel").onchange=(e)=>{ adj.wochenziel=Number(e.target.value)||0; markDirty(); renderMonat(); };
+  document.getElementById("mMonatsziel").onchange=(e)=>{ adj.monatsziel=Number(e.target.value)||0; markDirty(); renderMonat(); };
+  document.getElementById("mKaTarget").onchange=(e)=>{ adj.kaTarget=Number(e.target.value)||0; markDirty(); renderMonat(); };
   document.getElementById("gFreeMoDo").value = g.freeGoalMoDo;
   document.getElementById("gFreeFr").value = g.freeGoalFr;
   document.getElementById("gFriAdjust").value = g.friAdjustWeek;
   const wishEl=document.getElementById("gWunschGeht");
   wishEl.value=g.wunschGeht||"";
   wishEl.disabled=!isNow;
-  document.getElementById("gFreeMoDo").onchange=(e)=>{ g.freeGoalMoDo=Number(e.target.value)||0; markDirty(); renderGehtPanel(monthIdx); };
-  document.getElementById("gFreeFr").onchange=(e)=>{ g.freeGoalFr=Number(e.target.value)||0; markDirty(); renderGehtPanel(monthIdx); };
-  document.getElementById("gFriAdjust").onchange=(e)=>{ g.friAdjustWeek=Number(e.target.value)||0; g.friAdjustWZ=g.friAdjustWeek; markDirty(); renderGehtPanel(monthIdx); };
+  document.getElementById("gFreeMoDo").onchange=(e)=>{ g.freeGoalMoDo=Number(e.target.value)||0; markDirty(); renderMonat(); };
+  document.getElementById("gFreeFr").onchange=(e)=>{ g.freeGoalFr=Number(e.target.value)||0; markDirty(); renderMonat(); };
+  document.getElementById("gFriAdjust").onchange=(e)=>{ g.friAdjustWeek=Number(e.target.value)||0; g.friAdjustWZ=g.friAdjustWeek; markDirty(); renderMonat(); };
   wishEl.onchange=(e)=>{
     g.wunschGeht=e.target.value;
     if(applyWishGehtTime(g.wunschGeht)) renderMonat(); else markDirty();

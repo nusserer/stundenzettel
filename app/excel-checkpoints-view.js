@@ -46,18 +46,22 @@
     const ps = ctx.payoutSetting, auszahlen = ps.active;
     const inherited = ps.fromMonth!=null && ps.fromMonth!==monthNumber-1;
     const quelle = ps.fromMonth==null ? 'Standard: ansammeln' : (inherited ? 'übernommen ab '+ctx.monthNames[ps.fromMonth] : 'ab diesem Monat gewählt');
-    box.innerHTML=`<h2>Monatsabschluss <small>so entsteht der Saldo am Monatsende</small></h2>
+    const helpOpen = box.querySelector('.month-details')?.open || false;
+    box.innerHTML=`<h2>Monatsabschluss</h2>
       <table class="calc-table"><tbody>
         <tr><td>Übertrag aus dem Vormonat</td><td class="v">${hmSigned(opening)}</td></tr>
-        <tr><td>+ IST-Zeit <small>geleistete Arbeitszeit</small></td><td class="v">${hmSigned(sums.ist)}</td></tr>
-        <tr><td>− SOLL-Zeit <small>Vorgabe für den Monat</small></td><td class="v">${hmSigned(sums.soll)}</td></tr>
+        <tr><td title="Geleistete Arbeitszeit">+ IST-Zeit</td><td class="v">${hmSigned(sums.ist)}</td></tr>
+        <tr><td title="Vorgabe für den Monat">− SOLL-Zeit</td><td class="v">${hmSigned(sums.soll)}</td></tr>
         <tr class="sub"><td>= Überstunden im Monat</td><td class="v ${diff>=0?'pos':'neg'}">${hmSigned(diff)}</td></tr>
-        <tr><td colspan="2"><label class="chk"><input type="checkbox" id="epSpecial" ${auszahlen?'checked':''}> Überstunden auszahlen <small>(höchstens ${max} h pro Monat, der Rest wird angesammelt · ${quelle})</small></label></td></tr>
+        <tr><td colspan="2"><label class="chk"><input type="checkbox" id="epSpecial" ${auszahlen?'checked':''}> Überstunden auszahlen <small>max. ${max} h / Monat</small></label><div class="month-payout-status">${auszahlen?'Auszahlen':'Ansammeln'} · ${quelle} · gilt für Folgemonate</div></td></tr>
         ${auszahlen?`<tr><td>− Auszahlung Monatsplus <small>${diff<=0?'kein Plus im Monat':(diff>max?'auf '+max+' h begrenzt, '+hmSigned(diff-max)+' werden angesammelt':'komplettes Plus')}</small></td><td class="v">${hmSigned(pay.auto)}</td></tr>`:''}
-        <tr><td><label for="mPayout">− Zusätzlich ausgezahlt <small>optional, z. B. Auszahlung vom Gleitzeitkonto</small></label></td><td class="v"><input id="mPayout" type="number" step="0.1" value="${pay.manual}"> h</td></tr>
+        <tr><td><label for="mPayout" title="Optional, z. B. Auszahlung vom Gleitzeitkonto">− Zusätzlich ausgezahlt</label></td><td class="v"><input id="mPayout" type="number" step="0.1" value="${pay.manual}"> h</td></tr>
         <tr class="total"><td>= Übertrag in den nächsten Monat</td><td class="v">${hmSigned(closing)}</td></tr>
       </tbody></table>
-      <p class="hint">Die Wahl gilt ab diesem Monat für alle Folgemonate, bis sie in einem späteren Monat wieder geändert wird. Bei „Auszahlen“ bleibt der Saldo im Monat gleich, bis das Plus ${max} h übersteigt; ein Minus wird immer vom Konto abgezogen. Ohne Häkchen werden die Überstunden komplett angesammelt.</p>`;
+      <details class="month-details" ${helpOpen?'open':''}><summary>ⓘ Auszahlung &amp; Übertrag erklärt</summary>
+        <p class="hint">Die Wahl gilt ab diesem Monat für alle Folgemonate, bis sie in einem späteren Monat wieder geändert wird. Ohne Häkchen wird das gesamte Monatsplus angesammelt. Mit Häkchen werden höchstens ${max} h Monatsplus ausgezahlt; der Rest bleibt auf dem Konto. Ein Minus wird immer abgezogen. „Zusätzlich ausgezahlt“ gilt nur für diesen Monat und wird unabhängig davon abgezogen.</p>
+        <p class="hint">Übertrag = Vormonat + Monatsdifferenz − Auszahlung Monatsplus − zusätzliche Auszahlung.<br>Dieser Monat: ${hmSigned(opening)} + (${hmSigned(diff)}) − ${hmSigned(pay.auto)} − (${hmSigned(pay.manual)}) = ${hmSigned(closing)}.</p>
+      </details>`;
     byId('mPayout').onchange=e=>{adj.payout=n(e.target.value);ctx.markDirty();ctx.renderMonth();};
     byId('epSpecial').onchange=e=>{adj.payoutMode=e.target.checked?'on':'off'; adj.special=''; ctx.markDirty(); ctx.renderMonth();};
   }

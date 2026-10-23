@@ -67,7 +67,7 @@
             <tbody></tbody>
           </table>
         </div>
-        <p class="hint">Abgezogen wird die Dauer der festen Pausen (Einstellungen → Arbeitszeit) – außer eine eigene Pause ist eingetragen. Ab 6 h Arbeitszeit werden mindestens 30 Min., ab 9 h mindestens 45 Min. abgezogen. „!“ markiert eine gesetzlich zu kurze eigene Pause. Ein komplett leerer Tag (keine Zeiten, kein Code) zählt nicht mit.</p>
+        <p class="hint">Pause in Minuten: leer = automatisch, eigene Eingabe (auch 0) überschreibt. Automatisch gelten die festen Pausen und mindestens 30 Min. ab 6 h bzw. 45 Min. ab 9 h Arbeitszeit. „!“ = zu kurze Pause, „⚠ 10h“ = mehr als 10 h netto. Blau umrandetes Geht = ungespeicherter Vorschlag. Leere Tage zählen nicht mit.</p>
         <div class="panel">
           <h2>Monatsverlauf <small>Gleitzeitsaldo je Tag über den Monat</small></h2>
           <div class="chart-wrap"><svg id="monatChart" viewBox="0 0 1600 420" preserveAspectRatio="xMidYMid meet"></svg></div>
@@ -75,25 +75,34 @@
       </div>
 
       <div class="monat-col-side">
+        <div class="panel" id="gehtPanel">
+          <h2>Geht-Empfehlung heute <small id="gehtPanelSub"></small></h2>
+          <div id="gehtActive"></div>
+          <details class="month-details" id="gehtCodes">
+            <summary>Code wählen · alle Empfehlungen</summary>
+            <div class="tablewrap">
+              <table id="gehtTable"><thead><tr><th>Code</th><th>Bedeutung</th><th>Geht-Zeit</th></tr></thead><tbody></tbody></table>
+            </div>
+          </details>
+          <details class="month-details" id="gehtGoals">
+            <summary>Ziele &amp; Freitag-Anpassung</summary>
+            <div class="grid cols2 month-goals">
+              <div><label for="mWochenziel">Wochenziel (h)</label><input type="number" step="0.1" id="mWochenziel"></div>
+              <div><label for="mMonatsziel">Monatsziel (h)</label><input type="number" step="0.1" id="mMonatsziel"></div>
+              <div class="month-goal-wide"><label for="mKaTarget">Kurzarbeit: Zielstand (h)</label><input type="number" step="0.1" id="mKaTarget"><span class="hint">Niedrigster Stand der letzten 12 Monate, manuell anpassbar.</span></div>
+              <div><label for="gFreeMoDo">Freies Ziel Mo–Do (h)</label><input type="number" step="0.1" id="gFreeMoDo"></div>
+              <div><label for="gFreeFr">Freies Ziel Fr (h)</label><input type="number" step="0.1" id="gFreeFr"></div>
+              <div><label for="gFriAdjust">Freitag-Anpassung Woche/WZ (h)</label><input type="number" step="0.5" id="gFriAdjust"></div>
+              <div><label for="gWunschGeht">Wunsch-Geht-Zeit (heute)</label><input type="time" step="60" id="gWunschGeht"></div>
+            </div>
+          </details>
+        </div>
         <div class="panel" id="monatAbschluss"></div>
         <div class="panel">
           <h2>Monatsübersicht</h2>
-          <div class="kv-grid" id="monatKennzahlenTable"></div>
+          <div id="monatKennzahlenTable"></div>
         </div>
         <div class="panel" id="zeitverteilungMonat"></div>
-        <div class="panel" id="gehtPanel">
-          <h2>Geht-Empfehlung heute <small id="gehtPanelSub"></small></h2>
-          <div id="gehtActive" style="margin-bottom:10px;"></div>
-          <div class="tablewrap" style="max-height:none;">
-            <table id="gehtTable"><thead><tr><th>Code</th><th>Bedeutung</th><th>Geht-Zeit</th></tr></thead><tbody></tbody></table>
-          </div>
-          <div class="grid cols2" style="margin-top:12px;">
-            <div><label>Freies Ziel Mo–Do (h)</label><input type="number" step="0.1" id="gFreeMoDo"></div>
-            <div><label>Freies Ziel Fr (h)</label><input type="number" step="0.1" id="gFreeFr"></div>
-            <div><label>Freitag-Anpassung Woche/WZ (h)</label><input type="number" step="0.5" id="gFriAdjust"></div>
-            <div><label>Wunsch-Geht-Zeit (heute)</label><input type="time" step="60" id="gWunschGeht"></div>
-          </div>
-        </div>
       </div>
     </div>
   </div>

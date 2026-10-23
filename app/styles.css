@@ -157,7 +157,7 @@
   td.warnflag{color:var(--rust); font-weight:700; text-align:center;}
   .tablewrap{overflow:auto; max-height:74vh; border:1px solid var(--line); border-radius:var(--radius);}
   #view-monat .tablewrap,#view-jahr .tablewrap{overflow:visible;max-height:none;}
-  #view-monat .monat-layout{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(360px,1fr);gap:14px;align-items:start;}
+  #view-monat .monat-layout{display:grid;grid-template-columns:minmax(min-content,2.1fr) minmax(330px,1fr);gap:14px;align-items:start;}
   #view-monat .monat-col-side{display:block;max-width:none;width:100%;min-width:0;}
   #view-monat .panel,#view-jahr .panel{margin-bottom:12px;padding:12px 14px;}
   .view-head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:8px;}
@@ -493,3 +493,47 @@
   #monatTable td input.wide{min-width:160px; width:100%;}
   .calc-special .special-rules{margin:6px 0 8px 18px; padding:0;}
   .calc-special .special-rules li{margin:3px 0;}
+  /* Kompaktere Zeilen in der Monatstabelle */
+  #monatTable tbody td{padding:1px 4px; line-height:1.15;}
+  #monatTable tbody td input,#monatTable tbody td select{padding:1px 4px; height:22px; line-height:1.1;}
+  #monatTable .times-wrap .time-line-last,#monatTable .times-wrap .time-row.time-rows-stacked{gap:1px;}
+  #monatTable .times-wrap .time-add{padding:0 5px; line-height:18px;}
+
+  /* Monatsansicht: kompakte Kennzahlen und aufklappbare Empfehlungen/Ziele. */
+  .month-pause{display:flex;align-items:center;justify-content:center;gap:3px;}
+  #monatTable .month-pause input{width:48px;}
+  #monatTable .month-pause input::placeholder{color:var(--ink-soft);opacity:1;}
+  .month-pause input:placeholder-shown{background:#f6f4ee;border-style:dashed;}
+  .month-pause .warnflag{color:var(--rust);font-size:11px;font-weight:700;}
+  .month-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:10px;}
+  .month-stat{display:flex;flex-direction:column;gap:4px;padding:7px;background:var(--paper);border:1px solid var(--line);}
+  .month-stat span{font-size:11px;color:var(--ink-soft);}
+  .month-stat strong{font-size:16px;font-weight:600;}
+  .month-balances{font-size:12px;}
+  .month-balances caption{text-align:left;font-size:11px;color:var(--ink-soft);margin-bottom:4px;}
+  .month-balances th,.month-balances td{border:1px solid var(--line);padding:4px;text-align:center;}
+  .month-balances tbody th{text-align:left;}
+  .month-details{margin-top:5px;}
+  .month-details summary{padding:5px 0;cursor:pointer;font-size:12px;color:var(--ink-soft);}
+  .month-details[open] summary{color:var(--amber);margin-bottom:5px;}
+  .month-geht-active{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0;}
+  .month-geht-active strong{display:block;font-size:29px;line-height:1.1;color:var(--moss);}
+  .month-geht-active div>span{display:block;margin-top:4px;font-size:12px;}
+  #gehtTable td,#gehtTable th{padding:4px;white-space:normal;}
+  #gehtTable .geht-code-choice{padding:3px 6px;background:var(--paper);border:1px solid var(--line);color:var(--ink);min-width:38px;}
+  #gehtTable .geht-code-choice[aria-pressed="true"]{background:var(--amber-soft);border-color:var(--amber);font-weight:700;}
+  #gehtTable .geht-code-choice:hover{background:var(--amber-soft);}
+  .month-goals{margin:8px 0;gap:8px 12px;}
+  .month-goals input{width:100%;min-width:0;}
+  .month-goal-wide{grid-column:1 / -1;}
+  .month-goal-wide input{max-width:110px;}
+  .month-goal-wide .hint{display:block;}
+  #monatAbschluss .calc-table{max-width:none;font-size:13px;}
+  #monatAbschluss .calc-table td{padding:5px 4px;}
+  #monatAbschluss .calc-table .total td{font-size:14px;padding-top:8px;}
+  #monatAbschluss .calc-table td.v input{width:64px;padding:2px 5px;}
+  #monatAbschluss .calc-table label{margin:0;}
+  #monatAbschluss .month-payout-status{font-size:11px;color:var(--ink-soft);margin-top:4px;}
+  #zeitverteilungMonat h2 small{display:block;margin-top:3px;}
+  #zeitverteilungMonat .compact-kv td.lbl{white-space:normal;overflow-wrap:anywhere;width:auto;}
+  @media (max-width:1700px){#view-monat .monat-layout{grid-template-columns:1fr;}}
