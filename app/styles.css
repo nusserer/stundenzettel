@@ -536,4 +536,19 @@
   #monatAbschluss .month-payout-status{font-size:11px;color:var(--ink-soft);margin-top:4px;}
   #zeitverteilungMonat h2 small{display:block;margin-top:3px;}
   #zeitverteilungMonat .compact-kv td.lbl{white-space:normal;overflow-wrap:anywhere;width:auto;}
-  @media (max-width:1700px){#view-monat .monat-layout{grid-template-columns:1fr;}}
+  /* Laptop: Seitenspalte beibehalten, Tabelle platzsparender darstellen. */
+  @media (min-width:1280px) and (max-width:1700px){
+    #view-monat .monat-layout{grid-template-columns:minmax(min-content,1fr) 280px;gap:10px;}
+    #monatTable{font-size:12px;}
+    #monatTable th{font-size:11px;padding:4px 3px;}
+    #monatTable tbody td{padding:1px 2px;}
+    #monatTable tbody td input,#monatTable tbody td select{font-size:12px;}
+    #monatTable .times-wrap .time-row input[type="time"]{width:68px;}
+    #monatTable td input.wide{min-width:65px;}
+    #monatTable td select{min-width:58px;max-width:85px;}
+    #monatTable td:nth-child(4){white-space:normal;max-width:70px;overflow-wrap:anywhere;}
+    #monatTable .month-pause input{width:38px;}
+    #view-monat .monat-col-side .panel{padding:10px;}
+    #view-monat .month-stat span{overflow-wrap:anywhere;}
+  }
+  @media (max-width:1279px){#view-monat .monat-layout{grid-template-columns:1fr;}}
