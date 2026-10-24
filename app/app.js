@@ -75,8 +75,8 @@ function localDateTimeInputFromIso(iso){ const d=new Date(iso); return dateKey(d
       return !term || [entry.orderNr,entry.modul,entry.station,entry.aenderung,entry.kind].join(" ").toLowerCase().includes(term);
     });
     return entries.sort((a,b)=>{
-      const av=opt.sort.col==="dauer" ? durationMinutes(a) : (a[opt.sort.col]||"").toString().toLowerCase();
-      const bv=opt.sort.col==="dauer" ? durationMinutes(b) : (b[opt.sort.col]||"").toString().toLowerCase();
+      const av=opt.sort.col==="dauer" ? (opt.durationForEntry||durationMinutes)(a) : (a[opt.sort.col]||"").toString().toLowerCase();
+      const bv=opt.sort.col==="dauer" ? (opt.durationForEntry||durationMinutes)(b) : (b[opt.sort.col]||"").toString().toLowerCase();
       if(av<bv) return -1*opt.sort.dir;
       if(av>bv) return 1*opt.sort.dir;
       return a.id.localeCompare(b.id);
@@ -293,6 +293,8 @@ function normalizeState(s){
   return s;
 }
 let state = null;
+let taskEvaluationRevision = 0, taskEvaluationCache = null;
+const dayEditHistory = StundenzettelEditHistory.createHistory(20);
 let dirty = false;
 let currentView = "heute";
 let currentMonthIdx = new Date().getMonth(); // 0-11
@@ -455,6 +457,7 @@ async function openFromHandle(handle){
   return true;
 }
 function adoptState(obj, handle, meta){
+  dayEditHistory.clear();
   state = normalizeState(JSON.parse(JSON.stringify(obj)));
   dataLoaded = true; fileHandle = handle||null; fileNeedsReconnect = false; dirty = false;
   if(handle) idbSet("backupFile", handle);
@@ -715,12 +718,14 @@ function updateSaveStatusUI(){
 }
 
 function markDirty(){
+  taskEvaluationRevision++;
   dirty = true;
   if(dataLoaded){
     scheduleFileWrite();
     if(!fileHandle || fileNeedsReconnect) saveNotfall();
   }
   updateSaveStatusUI();
+  renderUndoNotice();
 }
 function markClean(){
   updateSaveStatusUI();
@@ -734,6 +739,33 @@ window.addEventListener("beforeunload", (e)=>{
   if(!window.StundenzettelTimeCore || StundenzettelTimeCore.shouldWarnBeforeUnload({dayOpen:stampedIn,taskRunning})){ e.preventDefault(); e.returnValue=""; }
 });
 window.addEventListener("pagehide", ()=>{ if(fileWriteTimer && fileHandle){ clearTimeout(fileWriteTimer); fileWriteTimer=null; writeToFile(); } });
+
+/* ---------------- Manuelle Tagesänderungen rückgängig ---------------- */
+function captureDayEdit(day, fields){ return StundenzettelEditHistory.capture(day,fields); }
+function recordDayEdit(key, label, before){
+  const day=state.days[key];
+  if(!day) return;
+  dayEditHistory.record({year:Number(key.slice(0,4)),key,label,before,after:captureDayEdit(day,Object.keys(before))});
+}
+function renderUndoNotice(){
+  const box=document.getElementById("undoNotice"), entry=dayEditHistory.peek();
+  if(!box) return;
+  box.hidden=!entry;
+  if(!entry) return;
+  document.getElementById("undoDescription").textContent=`${entry.label} am ${fmtDateDE(entry.key)} geändert · Verlauf nur für diese Sitzung`;
+  const target=entry.year===state.settings.year?state:state.archive[entry.year];
+  const button=document.getElementById("btnUndoDayEdit");
+  button.disabled=!target||Boolean(target.settings?.locked);
+  button.onclick=()=>{
+    const result=dayEditHistory.undo(e=>{
+      const view=e.year===state.settings.year?state:state.archive[e.year];
+      return view&&!view.settings?.locked?view.days[e.key]:null;
+    });
+    if(!result.ok){ toast("Nicht rückgängig gemacht: Das Feld wurde inzwischen erneut verändert oder das Jahr ist gesperrt.","warn"); return; }
+    markDirty(); renderAll(); renderMiniPlayer();
+    toast(`${result.entry.label} vom ${fmtDateDE(result.entry.key)} wiederhergestellt.`);
+  };
+}
 
 /* ---------------- Business logic ---------------- */
 function isHolidayOn(k){ return state.holidays.find(h=>h.date===k) || null; }
@@ -1162,6 +1194,7 @@ function applyYearLock(){
   }
 }
 function renderCurrentView(){
+  renderUndoNotice();
   recomputeCarryovers();
   document.getElementById("railYear").textContent = state.settings.year + (state.settings.locked?" 🔒":"");
   renderRailYearMenu();
@@ -1254,6 +1287,7 @@ function renderStempelList(k, day){
       const idx=Number(e.target.dataset.idx);
       const val=e.target.value;
       const wasAuto = (day.autoIdx||[]).includes(idx);
+      const before=captureDayEdit(day,["stamps","autoIdx"]);
       clearAutoStamp(day, idx); // jede Interaktion mit dem Feld gilt als Bestätigung
       if(val===""){
         // Eine geleerte Zeit, die nicht die letzte ist, würde eine Lücke reißen -> Feld ganz entfernen.
@@ -1263,14 +1297,18 @@ function renderStempelList(k, day){
         if(stamps[idx]===val && !wasAuto) return; // unverändert -> kein Re-Render nötig
         stamps[idx]=val;
       }
+      trimTrailingEmptyStamps(day);
+      recordDayEdit(k,"Zeit",before);
       markDirty(); renderHeute(); renderMiniPlayer();
     });
   });
   list.querySelectorAll(".stamp-del").forEach(el=>{
     el.addEventListener("click",()=>{
       const idx=Number(el.dataset.idx);
+      const before=captureDayEdit(day,["stamps","autoIdx"]);
       stamps.splice(idx,1);
       reindexAutoAfterSplice(day, idx);
+      recordDayEdit(k,"Zeit",before);
       markDirty(); renderHeute(); renderMiniPlayer();
     });
   });
@@ -1278,7 +1316,9 @@ function renderStempelList(k, day){
   addBtn.title = addBtn.disabled ? "Bitte zuerst die offene Geht-Zeit eintragen oder löschen." : "";
   addBtn.addEventListener("click", ()=>{
     if(isDayOpen({stamps})){ toast("Bitte zuerst die offene Geht-Zeit eintragen oder löschen, bevor eine neue Zeit hinzugefügt wird.", "warn"); return; }
+    const before=captureDayEdit(day,["stamps","autoIdx"]);
     stamps.push(nowTimeStr());
+    recordDayEdit(k,"Zeit",before);
     markDirty(); renderHeute(); renderMiniPlayer();
   });
 }
@@ -1800,8 +1840,11 @@ function renderHeuteAuftrag(){
   const box = document.getElementById("heuteAuftrag");
   const active = state.tasks.find(t=>t.status==="in Arbeit");
   const pausing = state.tasks.find(t=>t.status==="Pause");
-  const stoerToday = state.log.filter(l=>l.art==="stoerung" && localDateKeyFromIso(l.start)===todayKey()).reduce((sum,l)=>sum+StundenzettelTaskManagement.durationMinutes(l),0);
-  const stoerHint = stoerToday ? ` <span class="hint">· Störzeit heute: ${fmtDurMin(stoerToday)}</span>` : "";
+  const evaluation=getTaskEvaluation();
+  const todayEvaluation = evaluation.byDay[todayKey()];
+  const stoerToday = todayEvaluation?.stoer || 0;
+  const stoerFlags=evaluation.entries.filter(e=>e.art==="stoerung" && Object.hasOwn(e.byDay,todayKey())).reduce((s,e)=>({clipped:s.clipped||e.clipped,overlap:s.overlap||e.overlap,estimated:s.estimated||e.estimated}),{});
+  const stoerHint = stoerToday ? ` <span class="hint">· Störzeit heute: ${fmtDurMin(stoerToday)}</span>${taskEvaluationNotes(stoerFlags)}` : "";
   if(active){
     box.innerHTML = `<span class="badge ${active.kind==="stoerung"?"stoer":"on"}">${active.kind==="stoerung"?"Störung":"in Arbeit"}</span> <strong>${escapeHtml(active.orderNr||"(ohne Nr.)")}</strong> — ${escapeHtml(active.aenderung||"")}${stoerHint}`;
   } else if(pausing){
@@ -1812,63 +1855,42 @@ function renderHeuteAuftrag(){
 }
 
 /* ---------------- Zeitverteilung: Aufträge vs. Störungsarten ---------------- */
-/* Anwesenheits-Intervalle (ms) eines Tages laut Kommt/Geht; heute offen = bis jetzt. */
-function presenceIntervals(k){
-  const st=((state.days[k]||{}).stamps||[]).filter(t=>String(t||"").trim());
-  const [y,m,d]=k.split("-").map(Number), base=new Date(y,m-1,d).getTime(), out=[];
-  for(let i=0;i<st.length;i+=2){
-    const a=timeToMin(st[i]); if(a==null) continue;
-    let e = i+1<st.length ? timeToMin(st[i+1]) : (k===todayKey() ? timeToMin(nowTimeStr()) : null);
-    if(e==null) continue;
-    if(e<a) e+=1440; // über Mitternacht
-    out.push([base+a*60000, base+e*60000]);
-  }
-  return out;
+function getTaskEvaluation(){
+  const source = state, tick = Math.floor(Date.now()/1000);
+  if(taskEvaluationCache?.source===source && taskEvaluationCache.revision===taskEvaluationRevision && taskEvaluationCache.tick===tick) return taskEvaluationCache.result;
+  const views = {...source.archive, [source.settings.year]:source}, days = {};
+  Object.values(views).forEach(v=>Object.assign(days,v.days||{}));
+  const result = StundenzettelTaskEvaluation.evaluate({logs:source.log, tasks:source.tasks, days, now:new Date(), netMinutesForDay:k=>{
+    const view = views[Number(k.slice(0,4))];
+    if(!view) return 0;
+    const real = state, def = defaultSettings(Number(k.slice(0,4)));
+    const settings = Object.assign({},def,view.settings||{});
+    settings.weekly = Object.assign({},def.weekly,settings.weekly||{});
+    settings.rules = mergeRules(settings.rules);
+    state = {...view, settings, days, holidays:view.holidays||[], ui:source.ui};
+    try{ return Math.round((calcDay(k,true).ist||0)*60); }finally{ state=real; }
+  }});
+  taskEvaluationCache = {source, revision:taskEvaluationRevision, tick, result};
+  return result;
 }
-/* Auftrags-/Störungszeit zählt nur, soweit sie in die gestempelte Anwesenheit fällt (vergessenes Pausieren über Nacht wird so nicht mitgezählt).
-   Das Zeitprotokoll selbst bleibt unverändert. Ergebnis je Tag: {dateKey: Minuten}. */
-function loggedPresenceMinutesByDay(l){
-  const s=new Date(l.start).getTime(), e=new Date(l.stop).getTime(), res={};
-  if(!Number.isFinite(s) || !Number.isFinite(e) || e<=s) return res;
-  const first=new Date(s); first.setHours(0,0,0,0); first.setDate(first.getDate()-1); // Vortag wegen Nachtschicht
-  for(let d=new Date(first); d.getTime()<=e; d.setDate(d.getDate()+1)){
-    const k=dateKey(d); if(!state.days[k]) continue;
-    let min=0;
-    for(const [a,b] of presenceIntervals(k)) min += Math.max(0, Math.min(b,e) - Math.max(a,s));
-    if(min>0) res[k]=(res[k]||0)+Math.round(min/60000);
-  }
-  return res;
+function taskEvaluationNotes(info){
+  if(!info) return "";
+  const labels = [];
+  if(info.clipped) labels.push('<span class="evaluation-note" title="Nur gestempelte Anwesenheit berücksichtigt. Das ursprüngliche Zeitprotokoll bleibt unverändert.">bereinigt</span>');
+  if(info.overlap) labels.push('<span class="evaluation-note warning" title="Protokolle überlappen zeitlich. Welcher Auftrag tatsächlich bearbeitet wurde, ist nicht eindeutig.">Überlappung</span>');
+  if(info.estimated) labels.push('<span class="evaluation-note warning" title="Anteilig auf die Netto-IST-Zeit des Tages begrenzt. Rechnerische Schätzung, keine sicher rekonstruierte Aufteilung.">Schätzung</span>');
+  return labels.join(" ");
 }
 function timeDistribution(monthIdx){ // monthIdx: 0-11 oder null = ganzes Jahr
-  const res={auftrag:0, auftraege:{}, stoer:{}, total:0};
+  const res={auftrag:0, auftraege:Object.create(null), stoer:Object.create(null), total:0, clipped:false, overlap:false, estimated:false};
   const yearPrefix=String(state.settings.year)+"-";
-  const perDay={}; // dateKey -> [{art,name,min}]
-  (state.log||[]).forEach(l=>{
-    const s=new Date(l.start), e=new Date(l.stop);
-    if(Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return;
-    if(e.getFullYear()<state.settings.year || s.getFullYear()>state.settings.year) return;
-    for(const [k,v] of Object.entries(loggedPresenceMinutesByDay(l))){
-      if(!k.startsWith(yearPrefix)) continue;
-      if(monthIdx!=null && Number(k.slice(5,7))-1!==monthIdx) continue;
-      (perDay[k]=perDay[k]||[]).push({art:l.art, name:l.orderNr, min:v});
-    }
-  });
-  // Je Tag höchstens die IST-Zeit verteilen: überlappende Einträge (zwei gleichzeitig laufende Aufträge)
-  // und Pausen, in denen ein Auftrag weiterlief, werden anteilig gekürzt.
-  for(const [k,items] of Object.entries(perDay)){
-    const sum=items.reduce((t,x)=>t+x.min,0);
-    const istMin=Math.round((calcDay(k,true).ist||0)*60);
-    const f = sum>istMin && sum>0 ? istMin/sum : 1;
-    for(const x of items){
-      const min=x.min*f;
-      if(x.art==="stoerung"){ const name=x.name||"Störung"; res.stoer[name]=(res.stoer[name]||0)+min; }
-      else { res.auftrag+=min; const name=x.name||"(ohne Nr.)"; res.auftraege[name]=(res.auftraege[name]||0)+min; }
-      res.total+=min;
-    }
+  for(const [k,d] of Object.entries(getTaskEvaluation().byDay)){
+    if(!k.startsWith(yearPrefix) || (monthIdx!=null && Number(k.slice(5,7))-1!==monthIdx)) continue;
+    res.auftrag+=d.auftrag; res.total+=d.total;
+    res.stoer.gesamt=(res.stoer.gesamt||0)+d.stoer;
+    for(const [name,min] of Object.entries(d.orders)) res.auftraege[name]=(res.auftraege[name]||0)+min;
+    res.clipped ||= d.clipped; res.overlap ||= d.overlap; res.estimated ||= d.estimated;
   }
-  const r=v=>Math.round(v);
-  res.auftrag=r(res.auftrag); res.total=r(res.total);
-  for(const o of [res.auftraege,res.stoer]) for(const n in o) o[n]=r(o[n]);
   return res;
 }
 const fmtMin = m => fmtDurMin(m);
@@ -1887,7 +1909,7 @@ function renderZeitverteilung(monthIdx, istHours){
       <tr><td class="lbl">⚡ Störungen gesamt</td><td class="val">${fmtMin(stoerSum)}</td><td class="val">${pct(stoerSum)}</td></tr>
       <tr><td class="lbl">Nicht zugeordnet</td><td class="val">${fmtMin(unassigned)}</td><td class="val">${pct(unassigned)}</td></tr>
       <tr><td class="lbl">IST laut Stempeluhr</td><td class="val">${fmtMin(ist)}</td><td class="val"></td></tr>
-    </tbody></table>`;
+    </tbody></table><div class="evaluation-notes">${taskEvaluationNotes(dist)}</div><p class="hint">Aus Zeitprotokoll und laufendem Auftrag innerhalb der Anwesenheit. Manuelle Zusatzzeiten ohne Tageszuordnung stehen separat am Auftrag.</p>`;
 }
 function renderZeitverteilungJahr(){
   const box=document.getElementById("zeitverteilungJahr"); if(!box) return;
@@ -1897,7 +1919,7 @@ function renderZeitverteilungJahr(){
   box.innerHTML=`<h2>Zeitverteilung Aufträge / Störungen</h2><div class="tablewrap"><table class="compact-kv"><thead><tr><th></th>${MONTH_NAMES.map(m=>`<th>${m.slice(0,3)}</th>`).join("")}<th>Summe</th></tr></thead><tbody>
     ${rowOf("Aufträge",d=>d.auftrag,true)}
     ${rowOf("⚡ Störungen gesamt",d=>Object.values(d.stoer).reduce((s,v)=>s+v,0),true)}
-  </tbody></table></div>`;
+  </tbody></table></div><div class="evaluation-notes">${taskEvaluationNotes(timeDistribution(null))}</div>`;
 }
 
 /* ---------------- MONAT ---------------- */
@@ -1976,13 +1998,11 @@ function renderMonat(){
     <th>IST</th><th>SOLL</th><th>+/-</th><th>Saldo</th>
   </tr>`;
   tbody.innerHTML="";
-  const monthOpening = monthOpeningBalance(currentMonthIdx);
-  let running = monthOpening, cumDiff = 0;
+  const balances = new Map(monthBalanceSeries(currentMonthIdx).map(p=>[p.date,p.bal]));
   const tk = todayKey();
   for(const k of keys){
     const c = calcDay(k);
-    cumDiff = round2(cumDiff + c.diff);
-    running = round2(monthOpening + cumDiff - payoutForPlus(currentMonthIdx, cumDiff));
+    const running = balances.get(k);
     const wk = jsWeekdayKey(c.dateObj);
     const tr=document.createElement("tr");
     let cls=[];
@@ -2017,6 +2037,7 @@ function renderMonat(){
     el.addEventListener("change",(e)=>{
       const dk=e.target.dataset.day, f=e.target.dataset.f, v=e.target.value;
       const day=ensureDay(dk);
+      const beforeEdit=captureDayEdit(day,[f]);
       if(f==="code" && (v==="U"||v==="UH")){
         // Mehr Urlaub als verfügbar kann nicht eingetragen werden.
         const prev=day.code, before=vacationInfo().balance;
@@ -2031,6 +2052,7 @@ function renderMonat(){
         if(minutes==null){ toast("Bitte Pause in Minuten eingeben, z. B. 45.","warn"); renderMonat(); return; }
         day.pause = minutes;
       } else day[f]=v;
+      recordDayEdit(dk,({pause:"Pause",code:"Code",bemerkung:"Bemerkung"})[f]||f,beforeEdit);
       markDirty(); renderMonat();
     });
   });
@@ -2041,6 +2063,7 @@ function renderMonat(){
       const st=d.stamps;
       const val=e.target.value;
       if(e.target.dataset.planned && val===e.target.dataset.planned && st[idx]===undefined) return; // unveränderter Vorschlag: nichts speichern
+      const before=captureDayEdit(d,["stamps","autoIdx"]);
       while(st.length<=idx) st.push("");
       const wasAuto = (d.autoIdx||[]).includes(idx);
       clearAutoStamp(d, idx);
@@ -2052,6 +2075,7 @@ function renderMonat(){
         st[idx]=val;
       }
       trimTrailingEmptyStamps(d);
+      recordDayEdit(dk,"Zeit",before);
       markDirty(); renderMonat(); renderMiniPlayer();
     });
   });
@@ -2410,13 +2434,16 @@ function renderJahrBody(){
 
   const thead=document.querySelector("#jahrTable thead");
   const tbody=document.querySelector("#jahrTable tbody");
-  thead.innerHTML = `<tr><th>Monat</th><th>Übertrag</th><th>IST</th><th>SOLL</th><th>+/-</th><th>Saldo Ende</th>
+  thead.innerHTML = `<tr><th>Monat</th><th>Übertrag</th><th>IST</th><th>SOLL</th><th>+/-</th><th>Modus</th><th>Ausgezahlt</th><th>Saldo Ende</th>
     <th>Anwesenheit</th><th>U (U)/(UH)</th><th>K (K)</th><th>GLZ (GLZ)</th><th>VU (VU)</th></tr>`;
   tbody.innerHTML="";
-  let sumAnwesenheit=0, sumU=0, sumK=0, sumGLZ=0, sumVU=0;
+  let sumAnwesenheit=0, sumU=0, sumK=0, sumGLZ=0, sumVU=0, sumPaid=0;
   for(let m=0;m<12;m++){
     const s=monthSums(m);
     const open=monthOpeningBalance(m), close=monthClosingBalance(m);
+    const mode=payoutSetting(m), paid=monthPayoutInfo(m,s.diff);
+    const modeSource=mode.fromMonth==null?"Standard: ansammeln":`Gewählt ab ${MONTH_NAMES[mode.fromMonth]}, bis zur nächsten Änderung gültig`;
+    sumPaid+=paid.total;
     const anwesenheit = monthRange(m).filter(k=>calcDay(k).ist!=null).length;
     const uDays = countCode(m,"U") + countCode(m,"UH")*0.5;
     const kDays = countCode(m,"K");
@@ -2425,7 +2452,9 @@ function renderJahrBody(){
     sumAnwesenheit+=anwesenheit; sumU+=uDays; sumK+=kDays; sumGLZ+=glzDays; sumVU+=vuDays;
     const tr=document.createElement("tr");
     tr.innerHTML=`<td>${MONTH_NAMES[m]}</td><td class="num">${hoursToHM(open)}</td><td class="num">${hoursToHM(s.ist)}</td>
-      <td class="num">${hoursToHM(s.soll)}</td><td class="num">${hoursToHM(s.diff)}</td><td class="num">${hoursToHM(close)}</td>
+      <td class="num">${hoursToHM(s.soll)}</td><td class="num">${hoursToHM(s.diff)}</td>
+      <td title="${modeSource}">${mode.active?"Auszahlen":"Ansammeln"}</td>
+      <td class="num" title="Monatsplus: ${hoursToHM(paid.auto)} h · Zusätzlich: ${hoursToHM(paid.manual)} h">${hoursToHM(paid.total)}</td><td class="num">${hoursToHM(close)}</td>
       <td class="num">${anwesenheit}</td><td class="num">${uDays}</td><td class="num">${kDays}</td><td class="num">${glzDays}</td><td class="num">${vuDays}</td>`;
     tbody.appendChild(tr);
   }
@@ -2436,19 +2465,13 @@ function renderJahrBody(){
   trTotal.style.fontWeight="600";
   trTotal.style.borderTop="2px solid var(--ink)";
   trTotal.innerHTML=`<td>Jahr</td><td class="num">${hoursToHM(monthOpeningBalance(0))}</td><td class="num">${hoursToHM(round2(totIst))}</td>
-    <td class="num">${hoursToHM(round2(totSoll))}</td><td class="num">${hoursToHM(round2(totDiff))}</td><td class="num">${hoursToHM(monthClosingBalance(11))}</td>
+    <td class="num">${hoursToHM(round2(totSoll))}</td><td class="num">${hoursToHM(round2(totDiff))}</td><td>–</td><td class="num">${hoursToHM(round2(sumPaid))}</td><td class="num">${hoursToHM(monthClosingBalance(11))}</td>
     <td class="num">${sumAnwesenheit}</td><td class="num">${round2(sumU)}</td><td class="num">${sumK}</td><td class="num">${sumGLZ}</td><td class="num">${sumVU}</td>`;
   tbody.appendChild(trTotal);
 }
 function monthBalanceSeries(monthIdx){
-  const keys = monthRange(monthIdx);
-  let bal = monthOpeningBalance(monthIdx);
-  const pts = [];
-  for(const k of keys){
-    bal = round2(bal + calcDay(k).diff);
-    pts.push({date:k, bal});
-  }
-  return pts;
+  const prefix = `${state.settings.year}-${pad2(monthIdx+1)}-`;
+  return yearBalanceSeries().filter(p=>p.date.startsWith(prefix));
 }
 function drawMonthChart(monthIdx){
   const svg=document.getElementById("monatChart");
@@ -2612,14 +2635,15 @@ function renderRunningTask(){
     box.className="panel running-panel idle";
     box.innerHTML=`<h2>Aktueller Auftrag</h2><span class="hint">Kein Auftrag läuft.${paused?` Pausiert: <strong>${escapeHtml(paused.orderNr||"(ohne Nr.)")}</strong> `:""}</span>${paused?`<button data-run="start" data-id="${paused.id}" class="go run-btn">▶ Weiter</button>`:""}`;
   } else {
-    const live=t.activeSince?Math.max(0,Math.round((Date.now()-new Date(t.activeSince).getTime())/60000)):0;
+    const evaluation=getTaskEvaluation();
+    const live=evaluation.entries.find(e=>e.id===`live:${t.id}`)?.minutes||0;
     const isSt=t.kind==="stoerung";
     const interrupted=isSt?state.tasks.find(x=>x.id===state.ui.interruptedTaskId):null;
     box.className="panel running-panel"+(isSt?" stoer":"");
     box.innerHTML=`<h2>${isSt?"Aktuelle Störung":"Aktueller Auftrag"} <span class="badge ${isSt?"stoer":"on"}">${isSt?"Störung":"in Arbeit"}</span></h2>
       <div class="run-main"><div class="run-nr">${escapeHtml(t.orderNr||"(ohne Nr.)")}</div>
       <div class="run-meta">${isSt?(interrupted?"unterbricht Auftrag "+escapeHtml(interrupted.orderNr||"(ohne Nr.)"):"&nbsp;"):([t.modul,t.station,t.aenderung].filter(Boolean).map(escapeHtml).join(" · ")||"&nbsp;")}</div></div>
-      <div class="run-time"><span class="hint">Gesamt</span> <strong>${fmtDurMin(totalTaskMinutes(t.id)+live)}</strong> <span class="hint">· seit Start ${live} Min.</span></div>
+      <div class="run-time"><span class="hint">Gesamt (ausgewertet)</span> <strong>${fmtDurMin(totalTaskMinutes(t.id))}</strong> <span class="hint">· seit Start ${live} Min.</span>${taskEvaluationNotes(evaluation.byTask[t.id])}</div>
       <div class="run-actions">${isSt?`<button data-run="stop" data-id="${t.id}" class="run-btn">⏹ Störung beenden</button>`:`<button data-run="stop" data-id="${t.id}" class="run-btn">⏸ Pause</button><button data-run="fertig" data-id="${t.id}" class="secondary fertig-btn run-btn">✔ Fertig</button>`}<button data-run="edit" data-id="${t.id}" class="secondary run-btn">Bearbeiten</button></div>`;
   }
   box.querySelectorAll("[data-run]").forEach(b=>b.onclick=()=>{
@@ -2651,7 +2675,7 @@ function renderAuftraege(){
   });
   document.getElementById("taskListTitle").innerHTML = isStoer
     ? 'Störungen <small>Klick auf ▶ stempelt die Störung und unterbricht den laufenden Auftrag</small>'
-    : 'Auftragsliste <small>Klick auf ▶ startet den Auftrag, andere laufende werden pausiert</small>';
+    : 'Auftragsliste <small>Gesamt über alle Jahre: ausgewertete Anwesenheitszeit + manuelle Zusatzzeit. Klick auf ▶ startet den Auftrag.</small>';
   document.getElementById("btnNewTaskToggle").textContent = isStoer ? "+ Neue Störungsart" : "+ Neuer Auftrag";
   document.getElementById("taskDatum").value = todayKey();
   const thead=document.querySelector("#taskTable thead");
@@ -2709,7 +2733,7 @@ function renderAuftraege(){
         <td><input class="task-inline" data-task-id="${t.id}" data-task-field="orderNr" value="${escapeHtml(t.orderNr||"")}"></td>
         ${statusCell}
         <td class="num">${t.datum ? fmtDateDE(t.datum) : "–"}</td>
-        <td class="num">${fmtDurMin(dauer)}</td>
+        <td class="num">${fmtDurMin(dauer)}<div>${taskEvaluationNotes(getTaskEvaluation().byTask[t.id])}</div></td>
         <td><input class="task-inline" type="text" inputmode="numeric" placeholder="H:MM" data-task-id="${t.id}" data-task-field="manualDurationOffsetMinutes" value="${formatOffsetHM(t.manualDurationOffsetMinutes)}"></td>
         <td>${t.status!=="fertig"?`<button class="secondary" data-act="fertig" data-id="${t.id}">ausblenden</button>`:""}</td>`;
       tbody.appendChild(tr); return;
@@ -2723,7 +2747,7 @@ function renderAuftraege(){
       <td><input class="task-inline" data-task-id="${t.id}" data-task-field="aenderung" value="${escapeHtml(t.aenderung||"")}"></td>
       <td><select class="task-inline" data-task-id="${t.id}" data-task-field="status"><option ${t.status==='warten'?'selected':''}>warten</option><option ${t.status==='in Arbeit'?'selected':''}>in Arbeit</option><option ${t.status==='Pause'?'selected':''}>Pause</option><option ${t.status==='fertig'?'selected':''}>fertig</option></select></td>
       <td class="num">${t.datum ? fmtDateDE(t.datum) : "–"}</td>
-      <td class="num">${fmtDurMin(dauer)}</td>
+      <td class="num">${fmtDurMin(dauer)}<div>${taskEvaluationNotes(getTaskEvaluation().byTask[t.id])}</div></td>
       <td><input class="task-inline" type="text" inputmode="numeric" placeholder="H:MM" data-task-id="${t.id}" data-task-field="manualDurationOffsetMinutes" value="${formatOffsetHM(t.manualDurationOffsetMinutes)}"></td>
       <td>${t.status!=="fertig"?`<button class="secondary fertig-btn" data-act="fertig" data-id="${t.id}">fertig</button>`:""}</td>
     `;
@@ -2788,7 +2812,9 @@ function renderAuftraege(){
   ltbody.innerHTML="";
   const logSearch=document.getElementById("logSearch"), logTypeFilter=document.getElementById("logTypeFilter");
   if(!logSearch.dataset.wired){ logSearch.dataset.wired="1"; logSearch.oninput=()=>renderAuftraege(); logTypeFilter.onchange=()=>renderAuftraege(); }
-  StundenzettelTaskManagement.visibleLogEntries(state,{search:logSearch.value,type:logTypeFilter.value,sort:logSortState}).forEach(l=>{
+  const evaluation=getTaskEvaluation(), evaluatedLogs=new Map(evaluation.entries.map(e=>[e.id,e]));
+  const evaluatedDuration=l=>l.kind==="pause"?StundenzettelTaskManagement.durationMinutes(l):(evaluatedLogs.get(l.id)?.minutes||0);
+  StundenzettelTaskManagement.visibleLogEntries(state,{search:logSearch.value,type:logTypeFilter.value,sort:logSortState,durationForEntry:evaluatedDuration}).forEach(l=>{
     const tr=document.createElement("tr");
     const durMin = Math.round((new Date(l.stop)-new Date(l.start))/60000);
     if(l.kind==="pause"){
@@ -2796,7 +2822,7 @@ function renderAuftraege(){
     } else {
       const index=Number(l.id.slice(4));
       tr.innerHTML = `<td>${l.art==="stoerung"?"Störung":"Auftrag"}</td><td>${escapeHtml(l.orderNr||"")}</td><td><input data-log-index="${index}" data-log-field="aenderung" value="${escapeHtml(l.aenderung||"")}"></td>
-        <td><input type="datetime-local" step="1" data-log-index="${index}" data-log-field="start" value="${localDateTimeInputFromIso(l.start)}"></td><td><input type="datetime-local" step="1" data-log-index="${index}" data-log-field="stop" value="${localDateTimeInputFromIso(l.stop)}"></td><td class="num">${fmtDurMin(durMin)}</td>`;
+        <td><input type="datetime-local" step="1" data-log-index="${index}" data-log-field="start" value="${localDateTimeInputFromIso(l.start)}"></td><td><input type="datetime-local" step="1" data-log-index="${index}" data-log-field="stop" value="${localDateTimeInputFromIso(l.stop)}"></td><td class="num">${fmtDurMin(evaluatedDuration(l))}<small class="log-raw-duration">Protokoll: ${fmtDurMin(durMin)}</small>${taskEvaluationNotes(evaluatedLogs.get(l.id))}</td>`;
     }
     ltbody.appendChild(tr);
   });
@@ -2833,7 +2859,7 @@ function updateTaskMetadata(task, field, value){
 }
 function totalTaskMinutes(taskId){
   const task=state.tasks.find(t=>t.id===taskId);
-  return task ? StundenzettelTaskManagement.totalTaskMinutes(task,state.log) : 0;
+  return task ? StundenzettelTaskEvaluation.taskTotal(getTaskEvaluation(),task) : 0;
 }
 function nextTaskId(){ return state.tasks.reduce((m,t)=>Math.max(m,t.id),0)+1; }
 function setNewTaskOpen(open){

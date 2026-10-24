@@ -1,5 +1,5 @@
 /* Offline-Zwischenspeicher für die installierte App. Nur über http://localhost oder https aktiv, nie bei file://. */
-const VERSION = "2026.10.24.1";
+const VERSION = "2026.10.24.2";
 const CACHE = `stundenzettel-v3-${VERSION}`;
 const FILES = [
  "./",
@@ -8,6 +8,8 @@ const FILES = [
  "app/styles.css",
  "app/time-core.js",
  "app/day-pause.js",
+ "app/task-evaluation.js",
+ "app/edit-history.js",
  "app/excel-checkpoints-view.js",
  "app/app.js",
  "extensions/excel-parity/excel-parity.js",

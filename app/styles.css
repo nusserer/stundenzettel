@@ -552,3 +552,15 @@
     #view-monat .month-stat span{overflow-wrap:anywhere;}
   }
   @media (max-width:1279px){#view-monat .monat-layout{grid-template-columns:1fr;}}
+
+  .evaluation-note{display:inline-block;font-size:10px;font-weight:400;line-height:1.3;padding:1px 4px;margin:2px 0;border:1px solid var(--line);border-radius:3px;background:var(--paper);color:var(--ink-soft);white-space:normal;}
+  .evaluation-note.warning{border-color:var(--amber);color:#7b4b0b;background:#fff6df;}
+  .log-raw-duration{display:block;color:var(--ink-soft);font-size:10px;white-space:normal;}
+  .evaluation-notes:empty{display:none;}
+  .undo-notice{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;padding:7px 10px;border:1px solid var(--amber-soft);background:#fff8e9;font-size:12px;}
+  .undo-notice[hidden]{display:none;}
+  .undo-notice button{white-space:nowrap;}
+  .jahr-months{grid-column:1 / -1;grid-row:2;}
+  .jahr-chart{grid-column:1;}
+  .jahr-zeit{grid-column:1 / -1;}
+  @media(max-width:1100px){.jahr-chart,.jahr-zeit{grid-column:1;}}

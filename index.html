@@ -25,6 +25,7 @@
 <div id="main">
   <div id="yearOtherBanner" class="banner year-other" style="display:none;"></div>
   <div id="yearLockBanner" class="banner" style="display:none;"></div>
+  <div id="undoNotice" class="undo-notice" hidden><span id="undoDescription"></span><button type="button" id="btnUndoDayEdit" class="secondary">↶ Rückgängig</button></div>
 
   <!-- HEUTE -->
   <div class="view active" id="view-heute">
@@ -125,7 +126,7 @@
       <div class="chart-wrap"><svg id="jahrChart" viewBox="0 0 1080 290" preserveAspectRatio="xMidYMid meet"></svg></div>
     </div>
     <div class="panel jahr-months">
-      <h2>Monatsübersicht</h2>
+      <h2>Monatsübersicht <small>Auszahlung in Stunden inkl. zusätzlicher Auszahlung · laufender Monat vorläufig</small></h2>
       <div class="tablewrap" style="max-height:none;">
         <table id="jahrTable"><thead></thead><tbody></tbody></table>
       </div>
@@ -175,7 +176,7 @@
       </div>
     </div>
     <div class="panel">
-      <h2>Zeit-Log <small>entspricht „Stempelzeiten“ · Zeiten mit Sekunden</small></h2>
+      <h2>Zeit-Log <small>ausgewertete Dauer und ursprüngliche Protokolldauer · Zeitstempel bleiben unverändert</small></h2>
       <div class="grid cols3" style="margin-bottom:10px;">
         <div><label>Log durchsuchen</label><input id="logSearch" placeholder="Auftrag, Änderung, Pause …"></div>
         <div><label>Einträge</label><select id="logTypeFilter"><option value="all">Alle einschließlich Pausen</option><option value="tasks">Nur Auftragszeiten</option><option value="pauses">Nur Pausen</option><option value="auftraege">Nur Aufträge</option><option value="stoerungen">Nur Störungen</option></select></div>
@@ -328,4 +329,4 @@
   <div class="modal-box" id="modalBox"></div>
 </div>
 
-<script src="app/time-core.js"></script><script src="app/day-pause.js"></script><script src="extensions/excel-parity/excel-parity.js"></script><script src="app/excel-checkpoints-view.js"></script><script src="app/app.js"></script><script>if("serviceWorker" in navigator && location.protocol!=="file:") navigator.serviceWorker.getRegistration("sw.js").then(reg=>{if(!reg) return navigator.serviceWorker.register("sw.js");}).catch(()=>{});</script></body></html>
+<script src="app/time-core.js"></script><script src="app/day-pause.js"></script><script src="app/task-evaluation.js"></script><script src="app/edit-history.js"></script><script src="extensions/excel-parity/excel-parity.js"></script><script src="app/excel-checkpoints-view.js"></script><script src="app/app.js"></script><script>if("serviceWorker" in navigator && location.protocol!=="file:") navigator.serviceWorker.getRegistration("sw.js").then(reg=>{if(!reg) return navigator.serviceWorker.register("sw.js");}).catch(()=>{});</script></body></html>
