@@ -2,34 +2,34 @@
 
 <nav id="rail">
   <div class="brand">
-    <div class="t">Stundenzettel</div>
+    <div class="brand-head"><div class="t">Stundenzettel</div><button type="button" id="btnToggleRail" aria-controls="rail" aria-expanded="true" aria-label="Seitenleiste einklappen" title="Seitenleiste einklappen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button></div>
     <div class="y"><button type="button" id="railYearBtn" class="year-btn" aria-haspopup="listbox" aria-expanded="false" title="Jahr wechseln"><span id="railYear">–</span> <span class="caret">▾</span></button><div id="railYearMenu" class="year-menu" role="listbox" hidden></div></div>
   </div>
-  <div class="tab active" data-view="heute"><span>Heute</span></div>
-  <div class="tab" data-view="monat"><span>Monat</span></div>
-  <div class="tab" data-view="jahr"><span>Jahresübersicht</span></div>
-  <div class="tab" data-view="auftraege"><span>Aufträge</span> <span class="dot" id="dotTask"></span></div>
-  <div class="tab" data-view="urlaub"><span>Urlaub &amp; Saldo</span></div>
-  <div class="tab" data-view="fahrtkosten"><span>Fahrtkosten</span></div>
-  <div class="tab" data-view="rechner"><span>Arbeitszeit-Rechner</span></div>
-  <div class="tab" data-view="einstellungen"><span>Einstellungen</span></div>
+  <div class="tab active" data-view="heute" role="button" tabindex="0" title="Heute" aria-label="Heute" aria-current="page"><svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 9-8 9 8M5 10v11h14V10M9 21v-7h6v7"/></svg><span class="rail-label">Heute</span></div>
+  <div class="tab" data-view="monat" role="button" tabindex="0" title="Monat" aria-label="Monat"><svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 11h18M7 15h2M13 15h2M7 18h2"/></svg><span class="rail-label">Monat</span></div>
+  <div class="tab" data-view="jahr" role="button" tabindex="0" title="Jahresübersicht" aria-label="Jahresübersicht"><svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span class="rail-label">Jahresübersicht</span></div>
+  <div class="tab" data-view="auftraege" role="button" tabindex="0" title="Aufträge" aria-label="Aufträge"><svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V3h8v4M3 13h18M10 13v3h4v-3"/></svg><span class="rail-label">Aufträge</span> <span class="dot" id="dotTask"></span></div>
+  <div class="tab" data-view="urlaub" role="button" tabindex="0" title="Urlaub &amp; Saldo" aria-label="Urlaub &amp; Saldo"><svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/></svg><span class="rail-label">Urlaub &amp; Saldo</span></div>
+  <div class="tab" data-view="fahrtkosten" role="button" tabindex="0" title="Fahrtkosten" aria-label="Fahrtkosten"><svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 11 2-6h10l2 6M3 11h18v8H3zM6 19v2M18 19v2M6 15h2M16 15h2"/></svg><span class="rail-label">Fahrtkosten</span></div>
+  <div class="tab" data-view="rechner" role="button" tabindex="0" title="Arbeitszeit-Rechner" aria-label="Arbeitszeit-Rechner"><svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M8 6h8M8 11h2M14 11h2M8 15h2M14 15h2M8 19h2M14 19h2"/></svg><span class="rail-label">Arbeitszeit-Rechner</span></div>
+  <div class="tab" data-view="einstellungen" role="button" tabindex="0" title="Einstellungen" aria-label="Einstellungen"><svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h16M8 2v6M16 9v6M10 16v6"/></svg><span class="rail-label">Einstellungen</span></div>
   <div id="railFoot">
-    Speicherort: <span id="saveState">wird geladen</span><br>
-    <button id="btnReconnectHeader" class="secondary" style="display:none; width:100%; margin:6px 0 0; font-size:11.5px; padding:6px 8px;">Datei-Speicherung reaktivieren</button>
+    <div id="railSaveStatus" role="status" title="Speicherort: wird geladen"><svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h13l4 4v14H3V3zM7 3v6h10V3M7 21v-8h10v8"/></svg><span class="rail-save-label">Speicherort: </span><span id="saveState">wird geladen</span></div>
+    <button type="button" id="btnReconnectHeader" class="secondary rail-action" style="display:none;" title="Datei-Speicherung reaktivieren" aria-label="Datei-Speicherung reaktivieren"><svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 8a8 8 0 1 0 0 8M20 3v5h-5"/></svg><span class="rail-label">Datei-Speicherung reaktivieren</span></button>
     <span id="railClock"></span>
-    <button id="btnMiniPlayer" class="secondary" style="width:100%; margin-top:10px; margin-left:0; font-size:11.5px; padding:6px 8px;">🗗 Mini-Player öffnen</button>
-    <button id="btnCloseApp" class="secondary" style="width:100%; margin-top:6px; margin-left:0; font-size:11.5px; padding:6px 8px;">App schließen…</button>
+    <button type="button" id="btnMiniPlayer" class="secondary rail-action" title="Mini-Player öffnen" aria-label="Mini-Player öffnen"><svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M12 12h8v6h-8z"/></svg><span class="rail-label">🗗 Mini-Player öffnen</span></button>
+    <button type="button" id="btnCloseApp" class="secondary rail-action" title="App schließen…" aria-label="App schließen…"><svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3H4v18h6M8 12h13M16 7l5 5-5 5"/></svg><span class="rail-label">App schließen…</span></button>
   </div>
 </nav>
 
 <div id="main">
   <div id="yearOtherBanner" class="banner year-other" style="display:none;"></div>
   <div id="yearLockBanner" class="banner" style="display:none;"></div>
-  <div id="undoNotice" class="undo-notice" hidden><span id="undoDescription"></span><button type="button" id="btnUndoDayEdit" class="secondary">↶ Rückgängig</button></div>
+  <span id="undoNotice" class="undo-notice" hidden><button type="button" id="btnUndoDayEdit" class="secondary">↶ Rückgängig</button></span>
 
   <!-- HEUTE -->
   <div class="view active" id="view-heute">
-    <h1>Heute</h1>
+    <div class="view-head"><h1>Heute</h1><div class="view-actions" id="heuteActions"></div></div>
     <div class="sub" id="heuteDatum"></div>
 
     <div class="kpis" id="heuteKpis"></div>
@@ -57,7 +57,7 @@
 
   <!-- MONAT -->
   <div class="view" id="view-monat">
-    <div class="view-head"><h1>Monatsansicht</h1><div class="zoom-ctl" data-zoom-target="view-monat"><button class="secondary" data-zoom="-">−</button><span class="zoom-val">100%</span><button class="secondary" data-zoom="+">+</button><button class="secondary" data-zoom="fit">Auf Seite anpassen</button></div></div>
+    <div class="view-head"><h1>Monatsansicht</h1><div class="view-actions" id="monatActions"><div class="zoom-ctl" data-zoom-target="view-monat"><button class="secondary" data-zoom="-">−</button><span class="zoom-val">100%</span><button class="secondary" data-zoom="+">+</button><button class="secondary" data-zoom="fit">Auf Seite anpassen</button></div></div></div>
     <div id="monatTabs" class="sheet-tabs"></div>
     <div class="monat-layout">
       <div class="monat-col-main">

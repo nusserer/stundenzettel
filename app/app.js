@@ -699,7 +699,7 @@ function updateSaveStatusUI(){
   const label = document.getElementById("saveState");
   const reconnectButton = document.getElementById("btnReconnectHeader");
   const showReconnect = fileHandle && fileNeedsReconnect;
-  reconnectButton.style.display = showReconnect ? "block" : "none";
+  reconnectButton.style.display = showReconnect ? "flex" : "none";
   reconnectButton.onclick = showReconnect ? reconnectAutosaveFile : null;
   if(showReconnect) setTimeout(maybeShowStorageModal, 0);
   if(!dataLoaded){
@@ -715,6 +715,9 @@ function updateSaveStatusUI(){
     dot?.classList.add("show");
     label.textContent = "NICHT gespeichert – keine Datei verbunden";
   }
+  const railStatus=document.getElementById("railSaveStatus");
+  railStatus.title="Speicherort: "+label.textContent;
+  railStatus.classList.toggle("warning", dataLoaded && (!fileHandle || fileNeedsReconnect));
 }
 
 function markDirty(){
@@ -750,11 +753,14 @@ function recordDayEdit(key, label, before){
 function renderUndoNotice(){
   const box=document.getElementById("undoNotice"), entry=dayEditHistory.peek();
   if(!box) return;
-  box.hidden=!entry;
-  if(!entry) return;
-  document.getElementById("undoDescription").textContent=`${entry.label} am ${fmtDateDE(entry.key)} geändert · Verlauf nur für diese Sitzung`;
+  const actions=currentView==="monat"?document.getElementById("monatActions"):currentView==="heute"?document.getElementById("heuteActions"):null;
+  box.hidden=!entry||!actions;
+  if(!entry||!actions) return;
+  if(box.parentElement!==actions) actions.prepend(box);
   const target=entry.year===state.settings.year?state:state.archive[entry.year];
   const button=document.getElementById("btnUndoDayEdit");
+  button.title=`${entry.label} am ${fmtDateDE(entry.key)} rückgängig machen · Verlauf nur für diese Sitzung`;
+  button.setAttribute("aria-label",`${entry.label} vom ${fmtDateDE(entry.key)} rückgängig machen`);
   button.disabled=!target||Boolean(target.settings?.locked);
   button.onclick=()=>{
     const result=dayEditHistory.undo(e=>{
@@ -1144,15 +1150,42 @@ function glzTageVerfuegbar(){
 }
 
 /* ---------------- Rendering: nav ---------------- */
+/* SIDEBAR_TOGGLE_START */
+(function(){
+  const KEY="stundenzettel-v3-sidebar-collapsed", button=document.getElementById("btnToggleRail");
+  function apply(collapsed, persist){
+    document.body.classList.toggle("rail-collapsed", collapsed);
+    button.setAttribute("aria-expanded", String(!collapsed));
+    button.title=collapsed?"Seitenleiste ausklappen":"Seitenleiste einklappen";
+    button.setAttribute("aria-label", button.title);
+    document.getElementById("railYearMenu").hidden=true;
+    document.getElementById("railYearBtn").setAttribute("aria-expanded","false");
+    if(persist){ try{ localStorage.setItem(KEY,String(collapsed)); }catch(e){} }
+  }
+  let collapsed=false;
+  try{ collapsed=localStorage.getItem(KEY)==="true"; }catch(e){}
+  apply(collapsed, false);
+  button.addEventListener("click",()=>apply(!document.body.classList.contains("rail-collapsed"), true));
+})();
+/* SIDEBAR_TOGGLE_END */
 function switchView(v){
   if(v==="heute") ensureTodayYear(true); // Heute zeigt immer das Jahr des heutigen Datums
   currentView=v;
-  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active", t.dataset.view===v));
+  document.querySelectorAll(".tab").forEach(t=>{
+    const active=t.dataset.view===v;
+    t.classList.toggle("active",active);
+    if(active) t.setAttribute("aria-current","page"); else t.removeAttribute("aria-current");
+  });
   document.querySelectorAll(".view").forEach(el=>el.classList.remove("active"));
   document.getElementById("view-"+v).classList.add("active");
   renderCurrentView();
 }
-document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>switchView(t.dataset.view)));
+document.querySelectorAll(".tab").forEach(t=>{
+  t.addEventListener("click",()=>switchView(t.dataset.view));
+  t.addEventListener("keydown",e=>{
+    if(e.key==="Enter" || e.key===" "){ e.preventDefault(); switchView(t.dataset.view); }
+  });
+});
 
 function renderRailYearMenu(){
   const menu=document.getElementById("railYearMenu"), btn=document.getElementById("railYearBtn");
@@ -1167,9 +1200,24 @@ function renderRailYearMenu(){
     if(y!==state.settings.year) activateArchivedYear(y);
     if(currentView==="heute" && y!==new Date().getFullYear()) switchView("monat");
   });
-  btn.onclick=(e)=>{ e.stopPropagation(); menu.hidden=!menu.hidden; btn.setAttribute("aria-expanded", String(!menu.hidden)); };
+  btn.title=`Jahr wechseln · ${cur}${state.settings.locked?" · gesperrt":""}${cur!==thisYear?" · nicht das laufende Jahr":""}`;
+  btn.setAttribute("aria-label",btn.title);
+  btn.onclick=(e)=>{
+    e.stopPropagation(); menu.hidden=!menu.hidden; btn.setAttribute("aria-expanded", String(!menu.hidden));
+    if(!menu.hidden && document.body.classList.contains("rail-collapsed")){
+      menu.style.setProperty("--rail-menu-height",Math.max(0,document.documentElement.clientHeight-16)+"px");
+      const top=Math.max(8,Math.min(btn.getBoundingClientRect().top,document.documentElement.clientHeight-menu.offsetHeight-8));
+      menu.style.setProperty("--rail-menu-top",top+"px");
+    }
+  };
 }
-document.addEventListener("click",()=>{ const m=document.getElementById("railYearMenu"); if(m && !m.hidden){ m.hidden=true; document.getElementById("railYearBtn").setAttribute("aria-expanded","false"); } });
+function closeRailYearMenu(){
+  const menu=document.getElementById("railYearMenu");
+  if(menu && !menu.hidden){ menu.hidden=true; document.getElementById("railYearBtn").setAttribute("aria-expanded","false"); }
+}
+document.addEventListener("click",closeRailYearMenu);
+document.getElementById("rail").addEventListener("scroll",closeRailYearMenu);
+window.addEventListener("resize",closeRailYearMenu);
 function applyYearNotCurrent(){
   const thisYear=new Date().getFullYear(), other=state.settings.year!==thisYear;
   const banner=document.getElementById("yearOtherBanner");
@@ -1777,7 +1825,10 @@ function renderMiniPlayer(){
 function updateMiniPlayerButtonLabel(){
   const btn = document.getElementById("btnMiniPlayer");
   if(!btn) return;
-  btn.textContent = pipWindow ? "🗗 Mini-Player im Vordergrund" : "🗗 Mini-Player öffnen";
+  const label=pipWindow?"Mini-Player im Vordergrund":"Mini-Player öffnen";
+  btn.querySelector(".rail-label").textContent="🗗 "+label;
+  btn.title=label;
+  btn.setAttribute("aria-label",label);
 }
 
 document.getElementById("btnMiniPlayer").addEventListener("click", ()=>openMiniPlayer(false));

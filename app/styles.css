@@ -16,6 +16,7 @@
     --mono: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     --sans: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     --radius: 3px;
+    --rail-width:196px;
   }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;height:100%;}
@@ -27,21 +28,26 @@
     color:var(--ink);
     display:flex;
     min-height:100vh;
+    height:auto;
   }
   ::selection{background:var(--amber-soft);}
 
   /* ---------- Nav rail ---------- */
+  body.rail-collapsed{--rail-width:56px;}
   #rail{
-    width:196px;
-    flex:0 0 196px;
+    width:var(--rail-width);
+    flex:0 0 var(--rail-width);
     background:var(--rail);
     color:var(--rail-text);
     display:flex;
     flex-direction:column;
     padding:18px 0 12px;
-    position:sticky;
+    position:fixed;
     top:0;
-    height:100vh;
+    left:0;
+    bottom:0;
+    height:auto;
+    z-index:20;
     overflow-y:auto;
   }
   #rail .brand{
@@ -51,6 +57,12 @@
   }
   #rail .brand .t{font-size:15px; font-weight:600; letter-spacing:.2px; color:#fff;}
   #rail .brand .y{font-family:var(--mono); font-size:12px; color:var(--amber-soft); margin-top:2px;}
+  #rail .brand-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+  #btnToggleRail{width:28px;height:28px;flex:0 0 28px;padding:3px;background:transparent;color:var(--rail-text);border:1px solid var(--rail-soft);}
+  #btnToggleRail:hover{background:var(--rail-soft);color:#fff;}
+  #btnToggleRail svg{display:block;width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
+  #rail .rail-icon{display:none;width:18px;height:18px;flex:0 0 18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;}
+  #rail .brand,#rail .tab,#railFoot{flex-shrink:0;}
   .tab{
     display:flex; align-items:center; gap:10px;
     padding:10px 18px;
@@ -61,6 +73,7 @@
     position:relative;
   }
   .tab:hover{background:var(--rail-soft);}
+  .tab:focus-visible{outline:2px solid var(--amber-soft);outline-offset:-3px;}
   .tab.active{
     background:var(--paper);
     color:var(--ink);
@@ -80,9 +93,27 @@
     line-height:1.5;
   }
   #saveState{font-family:var(--mono); color:var(--amber-soft);}
+  #railSaveStatus{position:relative;}
+  #railSaveStatus.warning #saveState{color:#ffb25c;}
+  #railClock{display:block;}
+  #railFoot .rail-action{width:100%;margin:6px 0 0;font-size:11.5px;padding:6px 8px;align-items:center;justify-content:center;gap:6px;}
+  #railFoot #btnMiniPlayer{margin-top:10px;}
+  .rail-collapsed #rail .brand{padding:0 4px 12px;}
+  .rail-collapsed #rail .brand-head{justify-content:center;}
+  .rail-collapsed #btnToggleRail svg{transform:rotate(180deg);}
+  .rail-collapsed #rail .brand .t,.rail-collapsed #rail .rail-label,.rail-collapsed .rail-save-label,.rail-collapsed #railClock{display:none;}
+  .rail-collapsed #rail .rail-icon{display:block;}
+  .rail-collapsed #rail .tab{justify-content:center;min-height:40px;padding:10px 3px 10px 0;}
+  .rail-collapsed #rail .tab .dot{position:absolute;top:8px;right:8px;}
+  .rail-collapsed #railFoot{padding:12px 6px 0;}
+  .rail-collapsed #railFoot .rail-action{display:flex;min-height:34px;padding:7px 4px;}
+  .rail-collapsed #railSaveStatus{display:flex;align-items:center;justify-content:center;min-height:26px;}
+  .rail-collapsed #railSaveStatus.warning{color:#ffb25c;}
+  .rail-collapsed #railSaveStatus.warning::after{content:"";position:absolute;top:1px;right:4px;width:6px;height:6px;border-radius:50%;background:#ffb25c;}
+  .rail-collapsed #saveState{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;}
 
   /* ---------- Main ---------- */
-  #main{flex:1; min-width:0; padding:26px 34px 60px; max-width:none;}
+  #main{flex:1; min-width:0; margin-left:var(--rail-width); padding:26px 34px 60px; max-width:none;}
   h1{font-size:20px; margin:0 0 4px; letter-spacing:.1px;}
   .sub{color:var(--ink-soft); font-size:13px; margin-bottom:20px;}
   .view{display:none;}
@@ -387,6 +418,8 @@
   .set-ctl.unit span{color:var(--ink-soft); font-size:12.5px;}
   .set-ctl label.chk{margin:0;}
   .set-ctl button{width:100%;}
+  #updateRow .set-ctl{display:flex;flex-direction:column;gap:8px;}
+  #updateRow .set-ctl button+button{margin-left:0;}
   #setTabs{margin-bottom:16px;}
   @media (max-width:760px){ .set-row{grid-template-columns:1fr;} }
   .set-section h3{font-size:13.5px; font-weight:600; margin:22px 0 8px; padding-top:14px; border-top:1px solid var(--line);}
@@ -421,6 +454,10 @@
   .year-menu button:hover{background:var(--rail);}
   .year-menu button.active{color:#fff; font-weight:700; border-left:3px solid var(--amber); padding-left:7px;}
   .year-menu small{color:var(--amber-soft); font-family:var(--sans); font-size:10px; margin-left:4px;}
+  .rail-collapsed #rail .brand .y{text-align:center;}
+  .rail-collapsed .year-btn{max-width:100%;min-height:28px;padding:2px 0;font-size:10.5px;gap:0;justify-content:center;white-space:nowrap;}
+  .rail-collapsed .year-btn .caret,.rail-collapsed .year-btn.not-current #railYear::after{display:none;}
+  .rail-collapsed .year-menu{position:fixed;left:calc(var(--rail-width) + 4px);top:var(--rail-menu-top,70px);max-height:var(--rail-menu-height,calc(100vh - 16px));overflow-y:auto;}
 
   /* Hinweis: nicht im laufenden Jahr */
   .banner.year-other{background:#ffe9d0; border-color:#e0a05c; border-left-color:#d9822b;}
@@ -557,9 +594,11 @@
   .evaluation-note.warning{border-color:var(--amber);color:#7b4b0b;background:#fff6df;}
   .log-raw-duration{display:block;color:var(--ink-soft);font-size:10px;white-space:normal;}
   .evaluation-notes:empty{display:none;}
-  .undo-notice{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;padding:7px 10px;border:1px solid var(--amber-soft);background:#fff8e9;font-size:12px;}
+  .view-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .undo-notice{display:inline-flex;align-items:center;}
   .undo-notice[hidden]{display:none;}
-  .undo-notice button{white-space:nowrap;}
+  #btnUndoDayEdit{white-space:nowrap;font-size:11.5px;padding:3px 8px;line-height:18px;color:var(--ink-soft);background:transparent;}
+  #btnUndoDayEdit:hover:not(:disabled){color:var(--ink);background:var(--paper-alt);}
   .jahr-months{grid-column:1 / -1;grid-row:2;}
   .jahr-chart{grid-column:1;}
   .jahr-zeit{grid-column:1 / -1;}
