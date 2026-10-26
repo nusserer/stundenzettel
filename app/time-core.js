@@ -24,9 +24,10 @@
       if (!isTime(item?.start) || !isTime(item?.end)) continue;
       const id = `${date}:${item.start}:${item.end}:${item.label || 'Pause'}`;
       const start = toMinutes(item.start), end = toMinutes(item.end);
+      if (start >= 1440 || end >= 1440 || end <= start) continue;
       const state = fired[id] || {};
-      if (nowMinutes >= start && nowMinutes < end && !state.start) result.push({ type: 'start', id, item });
-
+      if (nowMinutes >= start && nowMinutes < end && !state.pauseStarted && !state.skipped) result.push({ type: 'start', id, item });
+      if (nowMinutes >= end && state.pauseStarted && !state.pauseEnded) result.push({ type: 'end', id, item });
     }
     return result;
   }

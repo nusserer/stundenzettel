@@ -813,7 +813,8 @@ function calcPauseMinutes(day, dateObj, holiday, liveNow){
   const groupHasBreaks = (r.breaks[dayGroup(dateObj)] || []).length > 0;
   const standard = holiday ? (Number(r.pause.holiday) || 0) : (groupHasBreaks ? fixedBreakMinutes(dateObj) : (Number(r.pause[dayGroup(dateObj)]) || 0));
   // 3) Mit dem Pause-Button erfasste Tagespausen verlängern die Pause, wenn sie länger sind.
-  const logged = (Array.isArray(day.dayPauses) && day.dayPauses.length && window.StundenzettelDayPause) ? StundenzettelDayPause.minutes(day, liveNow) : 0;
+  // Automatisch protokollierte Regelpausen sind bereits im Standard enthalten.
+  const logged = (Array.isArray(day.dayPauses) && day.dayPauses.length && window.StundenzettelDayPause) ? StundenzettelDayPause.minutes(day, liveNow, {excludeScheduled:true}) : 0;
   let pause = Math.max(standard, logged);
   // 4) Gesetzliche Mindestpause wie im Excel: liegt die Netto-Zeit (Anwesenheit − Pause) bei 9 h oder mehr, gelten mindestens 45 Min.,
   //    ab 6 h mindestens 30 Min. (z. B. Freitag 30 → 45 Min., sobald 9 h überschritten werden).
@@ -1510,8 +1511,15 @@ function doPauseStop(){
   if(!ensureTodayYear()) return;
   const day = ensureDay(todayKey());
   try {
-    if(window.StundenzettelDayPause) StundenzettelDayPause.end(day, new Date().toISOString(), 'manual');
-    activeTaskResume();
+    const open=(day.dayPauses||[]).findLast(p=>!p.end);
+    if(open?.scheduledBreakId){
+      const entry=scheduledBreakState()[open.scheduledBreakId];
+      if(entry) finishScheduledPause(day,open.scheduledBreakId,entry,new Date().toISOString());
+      else StundenzettelDayPause.end(day,new Date().toISOString(),'manual');
+    } else {
+      if(window.StundenzettelDayPause) StundenzettelDayPause.end(day, new Date().toISOString(), 'manual');
+      activeTaskResume();
+    }
     markDirty(); renderHeute(); renderMiniPlayer();
   } catch(error) { toast(error.message, 'warn'); }
 }
@@ -1792,11 +1800,13 @@ function renderMiniPlayer(){
   const fBtn = doc.getElementById("ppFeierabend"); if(fBtn) fBtn.disabled = !isDayOpen(d);
 
   const active = state.tasks.find(t=>t.status==="in Arbeit");
-  const pausing = state.tasks.find(t=>t.status==="Pause");
+  const openPause=(d.dayPauses||[]).findLast(p=>!p.end);
+  const pausing = openPause?.scheduledBreakId?state.tasks.find(t=>t.id===openPause.resumeTaskId):state.tasks.find(t=>t.status==="Pause");
   const pauseBtn = doc.getElementById("ppPauseToggle");
   if(pauseBtn){
     if(active){ pauseBtn.textContent="⏸ Pause ("+(active.orderNr||"ohne Nr.")+")"; pauseBtn.disabled=false; pauseBtn.onclick=doPauseStart; }
-    else if(pausing){ pauseBtn.textContent="▶ Weiter ("+(pausing.orderNr||"ohne Nr.")+")"; pauseBtn.disabled=false; pauseBtn.onclick=doPauseStop; }
+    else if(openPause){ pauseBtn.textContent=pausing?"▶ Weiter ("+(pausing.orderNr||"ohne Nr.")+")":"▶ Pause beenden"; pauseBtn.disabled=false; pauseBtn.onclick=doPauseStop; }
+    else if(pausing){ pauseBtn.textContent="▶ Weiter ("+(pausing.orderNr||"ohne Nr.")+")"; pauseBtn.disabled=false; pauseBtn.onclick=()=>{ activeTaskResume(); markDirty(); renderHeute(); renderMiniPlayer(); }; }
     else { pauseBtn.textContent="Pause"; pauseBtn.disabled=true; pauseBtn.onclick=null; }
   }
 
@@ -1890,7 +1900,8 @@ function codeSelectHtml(dayKey, current){
 function renderHeuteAuftrag(){
   const box = document.getElementById("heuteAuftrag");
   const active = state.tasks.find(t=>t.status==="in Arbeit");
-  const pausing = state.tasks.find(t=>t.status==="Pause");
+  const openPause=(state.days[todayKey()]?.dayPauses||[]).findLast(p=>!p.end);
+  const pausing = openPause?.scheduledBreakId?state.tasks.find(t=>t.id===openPause.resumeTaskId):state.tasks.find(t=>t.status==="Pause");
   const evaluation=getTaskEvaluation();
   const todayEvaluation = evaluation.byDay[todayKey()];
   const stoerToday = todayEvaluation?.stoer || 0;
@@ -2960,17 +2971,28 @@ function addTaskFromForm(startNow){
 }
 document.getElementById("btnTaskAdd").addEventListener("click",()=>addTaskFromForm(false));
 document.getElementById("btnTaskAddStart").addEventListener("click",()=>addTaskFromForm(true));
-function logCloseActive(t){
+function logCloseActive(t, at){
   if(t.activeSince){
-    state.log.push({taskId:t.id, art:t.kind||"auftrag", orderNr:t.orderNr, modul:t.modul, station:t.station, aenderung:t.aenderung, start:t.activeSince, stop:new Date().toISOString()});
+    state.log.push({taskId:t.id, art:t.kind||"auftrag", orderNr:t.orderNr, modul:t.modul, station:t.station, aenderung:t.aenderung, start:t.activeSince, stop:at||new Date().toISOString()});
     t.activeSince=null;
   }
 }
-function taskStart(id){
+function taskStart(id, at){
   const t = state.tasks.find(x=>x.id===id);
+  // Während einer automatischen Pause bleibt auch ein neu gewählter Auftrag pausiert und wird erst zum Pausenende aktiviert.
+  const scheduled=!at && (state.days[todayKey()]?.dayPauses||[]).findLast(p=>!p.end && p.scheduledBreakId);
+  const entry=scheduled && scheduledBreakState()[scheduled.scheduledBreakId];
+  if(t && entry && entry.pauseStarted && !entry.pauseEnded){
+    const previous=state.tasks.find(x=>x.id===entry.resumeTaskId);
+    if(previous && previous.id!==id && previous.status==="Pause") previous.status="warten";
+    t.status=t.kind==="stoerung"?"warten":"Pause";
+    scheduled.resumeTaskId=id; entry.resumeTaskId=id; entry.resumeStatus=t.status;
+    toast(`Pause läuft: „${t.orderNr||"(ohne Nr.)"}“ wird nach der Pause aktiviert.`);
+    return;
+  }
   state.tasks.forEach(o=>{
     if(o.status==="in Arbeit" && o.id!==id){
-      logCloseActive(o);
+      logCloseActive(o, at);
       const label = o.orderNr||"(ohne Nr.)";
       if(t.kind==="stoerung" && o.kind!=="stoerung"){
         // Störung unterbricht den laufenden Auftrag; er wird für „Zurück zum Auftrag“ gemerkt.
@@ -2984,11 +3006,11 @@ function taskStart(id){
     }
   });
   t.status="in Arbeit";
-  t.activeSince = new Date().toISOString();
+  t.activeSince = at||new Date().toISOString();
 }
-function taskPause(id){
+function taskPause(id, at){
   const t = state.tasks.find(x=>x.id===id);
-  logCloseActive(t);
+  logCloseActive(t, at);
   t.status = t.kind==="stoerung" ? "warten" : "Pause";
 }
 /* Störung beenden: Beschreibung (optional) je Stempelung + Rückkehr zum unterbrochenen Auftrag. */
@@ -3032,6 +3054,10 @@ function activeTaskResume(){
 }
 function resumeLatestTaskOnOpen(){
   if(!state.settings.stempelnAktiv) return false;
+  const day=state.days[todayKey()], now=new Date();
+  if((day?.dayPauses||[]).some(p=>!p.end && p.scheduledBreakId)) return false;
+  const breaks=rulesOf().breaks[dayGroup(now)]||[];
+  if(window.StundenzettelTimeCore?.dueScheduledBreaks({date:todayKey(),nowMinutes:now.getHours()*60+now.getMinutes(),breaks}).length) return false;
   const active = state.tasks.find(t=>t.status==="in Arbeit");
   if(active){
     setTimeout(()=>alert("Es läuft bereits ein Auftrag. Bitte Zeiten prüfen"), 0);
@@ -3045,6 +3071,7 @@ function resumeLatestTaskOnOpen(){
   return true;
 }
 function taskFinish(id){
+  state.ui.taskRevision=(state.ui.taskRevision||0)+1;
   const t = state.tasks.find(x=>x.id===id);
   logCloseActive(t);
   t.status="fertig";
@@ -3370,19 +3397,71 @@ function checkTenHourLimit(){
   fireBigAlert(msg, overTen ? "danger" : "warn");
 }
 function scheduledBreakState(){ return state.ui.scheduledBreaks || (state.ui.scheduledBreaks={}); }
+function finishScheduledPause(day, id, entry, endAt=entry.endAt){
+  entry.pauseEnded=true;
+  const pause=(day.dayPauses||[]).find(p=>p.scheduledBreakId===id);
+  if(!pause || pause.end) return;
+  const open=isDayOpen(day);
+  let end=new Date(endAt).getTime();
+  if(!open){
+    const last=(day.stamps||[]).filter(Boolean).at(-1);
+    const gone=new Date(entry.date+"T"+last+":00").getTime();
+    if(Number.isFinite(gone)) end=Math.max(new Date(pause.start).getTime(),Math.min(end,gone));
+  }
+  pause.end=new Date(end).toISOString();
+  const task=state.tasks.find(t=>t.id===entry.resumeTaskId);
+  // Wurde in der Pause ein anderer Auftrag gestempelt, endet dieser zum Pausenende; es geht zurück zum ursprünglichen Auftrag.
+  if(open && task && task.status===entry.resumeStatus && !task.activeSince) taskStart(task.id,pause.end);
+}
 function checkAutoStamps(){
   if(!dataLoaded) return;
   checkTenHourLimit();
   const now = new Date();
   const k = dateKey(now);
   const wd = jsWeekdayKey(now);
-  if(wd==="sa"||wd==="so") return;
-  const fired=scheduledBreakState(), schedule=rulesOf().breaks[dayGroup(now)]||[];
+  const year=state.settings.year===now.getFullYear()?state:state.archive?.[now.getFullYear()];
+  if(!year || year.settings.locked || wd==="sa"||wd==="so") return;
+  const day=year.days[k];
+  if(!day) return;
+  const fired=scheduledBreakState(), schedule=(year.settings.rules||defaultRules()).breaks[dayGroup(now)]||[];
+  let changed=false;
+  // Bereits begonnene Pausen behalten ihr Ende, auch wenn die Einstellungen inzwischen geändert wurden.
+  for(const [id,entry] of Object.entries(fired)){
+    if(entry.date===k && entry.pauseStarted && !entry.pauseEnded && now.getTime()>=new Date(entry.endAt).getTime()){
+      finishScheduledPause(day,id,entry); changed=true;
+    }
+  }
   const due=window.StundenzettelTimeCore?.dueScheduledBreaks({date:k,nowMinutes:now.getHours()*60+now.getMinutes(),breaks:schedule,fired})||[];
   due.forEach(event=>{
+    if(event.type!=="start" || !isDayOpen(day)) return;
     const entry=fired[event.id]||{};
-    if(event.type==="start"){ fired[event.id]=Object.assign({},entry,{start:true}); firePauseAlert(event); }
+    if((day.dayPauses||[]).some(p=>!p.end)){
+      fired[event.id]=Object.assign({},entry,{skipped:true}); changed=true; return;
+    }
+    if((day.dayPauses||[]).some(p=>p.scheduledBreakId===event.id)){
+      fired[event.id]=Object.assign({},entry,{skipped:true}); changed=true; return;
+    }
+    const lastCome=(day.stamps||[]).filter(Boolean).at(-1);
+    const start=new Date(Math.max(new Date(k+"T"+event.item.start+":00").getTime(),new Date(k+"T"+lastCome+":00").getTime()));
+    StundenzettelDayPause.start(day,start.toISOString(),"scheduled");
+    const pause=day.dayPauses.at(-1), task=state.tasks.find(t=>t.status==="in Arbeit");
+    pause.scheduledBreakId=event.id;
+    pause.resumeTaskId=task?.id??null;
+    if(task){
+      const since=new Date(task.activeSince).getTime();
+      taskPause(task.id,new Date(Math.max(start.getTime(),Number.isFinite(since)?since:start.getTime())).toISOString());
+    }
+    fired[event.id]=Object.assign({},entry,{start:true,pauseStarted:true,pauseEnded:false,date:k,
+      endAt:new Date(k+"T"+event.item.end+":00").toISOString(),resumeTaskId:task?.id??null,
+      resumeStatus:task?.status,taskRevision:state.ui.taskRevision||0});
+    if(!entry.start) firePauseAlert(event);
+    changed=true;
   });
+  if(changed){
+    markDirty();
+    if(typeof document==="undefined" || !document.activeElement?.closest("input,select,textarea")) renderCurrentView();
+    renderMiniPlayer();
+  }
 }
 function initAutoScheduler(){
   if(autoSchedulerTimer || !dataLoaded) return;
