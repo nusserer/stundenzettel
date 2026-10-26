@@ -6,7 +6,7 @@
     <div class="y"><button type="button" id="railYearBtn" class="year-btn" aria-haspopup="listbox" aria-expanded="false" title="Jahr wechseln"><span id="railYear">–</span> <span class="caret">▾</span></button><div id="railYearMenu" class="year-menu" role="listbox" hidden></div></div>
   </div>
   <div class="tab active" data-view="heute" role="button" tabindex="0" title="Heute" aria-label="Heute" aria-current="page"><svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 9-8 9 8M5 10v11h14V10M9 21v-7h6v7"/></svg><span class="rail-label">Heute</span></div>
-  <div class="tab" data-view="monat" role="button" tabindex="0" title="Monat" aria-label="Monat"><svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 11h18M7 15h2M13 15h2M7 18h2"/></svg><span class="rail-label">Monat</span></div>
+  <div class="tab" data-view="monat" role="button" tabindex="0" title="Monat" aria-label="Monat"><svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 11h18M7 15h2M13 15h2M7 18h2"/></svg><span class="rail-label">Monat</span> <span class="dot" id="dotUnchecked"></span></div>
   <div class="tab" data-view="jahr" role="button" tabindex="0" title="Jahresübersicht" aria-label="Jahresübersicht"><svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span class="rail-label">Jahresübersicht</span></div>
   <div class="tab" data-view="auftraege" role="button" tabindex="0" title="Aufträge" aria-label="Aufträge"><svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V3h8v4M3 13h18M10 13v3h4v-3"/></svg><span class="rail-label">Aufträge</span> <span class="dot" id="dotTask"></span></div>
   <div class="tab" data-view="urlaub" role="button" tabindex="0" title="Urlaub &amp; Saldo" aria-label="Urlaub &amp; Saldo"><svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/></svg><span class="rail-label">Urlaub &amp; Saldo</span></div>
@@ -36,6 +36,7 @@
 
     <div class="panel">
       <h2>Stempeln</h2>
+      <div id="heuteUnchecked" class="unchecked-hint" role="status" hidden></div>
       <div id="heuteStempelForm"></div>
       <div class="btnrow">
         <button class="go" id="btnKommen">Kommt (jetzt)</button>
@@ -61,6 +62,7 @@
     <div id="monatTabs" class="sheet-tabs"></div>
     <div class="monat-layout">
       <div class="monat-col-main">
+        <div id="monatUnchecked" class="unchecked-hint" role="status" hidden></div>
         <div id="monatLegend" class="code-legend"></div>
         <div class="tablewrap">
           <table id="monatTable">

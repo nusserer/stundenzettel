@@ -302,6 +302,14 @@
   .stamp-row input[type="time"]{width:auto; padding:3px 5px;}
   input.auto-pending{border:2px solid var(--rust) !important; background:#fdf3f2;}
   input.planned-geht{border:2px solid #2f6fd0 !important; background:#eaf2ff; color:#1d4f9c;}
+  .stamp-confirm{margin-left:6px; padding:1px 7px; font-size:11px; line-height:16px; background:transparent; color:var(--rust); border:1px solid var(--rust); white-space:nowrap;}
+  .stamp-confirm:hover{background:var(--rust); color:#fff;}
+  .time-pair .stamp-confirm{margin-left:2px; padding:0 4px; font-size:10.5px; line-height:16px; flex:0 0 auto;}
+  .unchecked-hint{display:inline-block; margin:0 0 8px; padding:3px 9px; font-size:12px; color:#7b4b0b; background:#fff6df; border:1px solid var(--amber-soft); border-radius:var(--radius);}
+  .unchecked-hint[hidden]{display:none;}
+  /* Markierte Zeiten in der Monatstabelle: gleiche Feldgröße wie unmarkierte (Rahmen 1 px + Innenlinie), damit die Uhrzeit nicht abgeschnitten wird. */
+  #monatTable input.auto-pending,#monatTable input.missing-stamp{border-width:1px !important; box-shadow:inset 0 0 0 1px var(--rust);}
+  #monatTable input.planned-geht{border-width:1px !important; box-shadow:inset 0 0 0 1px #2f6fd0;}
   input.missing-stamp{border:2px solid var(--rust) !important; background:#fbe6e0;}
   .stamp-row .stamp-del{
     padding:2px 6px; font-size:11px; border:1px solid var(--line); background:#fff; color:var(--ink-soft);

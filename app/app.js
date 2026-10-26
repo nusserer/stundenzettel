@@ -729,6 +729,7 @@ function markDirty(){
   }
   updateSaveStatusUI();
   renderUndoNotice();
+  renderUncheckedHint();
 }
 function markClean(){
   updateSaveStatusUI();
@@ -1244,6 +1245,7 @@ function applyYearLock(){
 }
 function renderCurrentView(){
   renderUndoNotice();
+  renderUncheckedHint();
   recomputeCarryovers();
   document.getElementById("railYear").textContent = state.settings.year + (state.settings.locked?" 🔒":"");
   renderRailYearMenu();
@@ -1320,7 +1322,8 @@ function renderStempelList(k, day){
     const row = document.createElement("div");
     row.className = "stamp-row";
     row.innerHTML = `<span class="stamp-label">${label}</span>
-      <input type="time" lang="de-DE" class="${isAuto?"auto-pending":""}" data-idx="${i}" value="${t||""}" title="${isAuto?"Automatisch eingetragen — bitte prüfen und bestätigen":""}">
+      <input type="time" lang="de-DE" class="${isAuto?"auto-pending":""}" data-idx="${i}" value="${t||""}" title="${isAuto?"Automatisch eingetragen — bitte prüfen und mit „✓ geprüft“ bestätigen":""}">
+      ${isAuto&&String(t||"").trim()?`<button type="button" class="stamp-confirm" data-idx="${i}" title="Zeit ist richtig – Markierung entfernen">✓ geprüft</button>`:""}
       <button type="button" class="stamp-del" data-idx="${i}" title="Löschen">✕</button>`;
     list.appendChild(row);
   });
@@ -1335,21 +1338,23 @@ function renderStempelList(k, day){
     el.addEventListener("blur",(e)=>{
       const idx=Number(e.target.dataset.idx);
       const val=e.target.value;
-      const wasAuto = (day.autoIdx||[]).includes(idx);
+      if(val===(stamps[idx]||"")) return; // bloßes Anklicken bestätigt nichts; dafür gibt es „✓ geprüft“
       const before=captureDayEdit(day,["stamps","autoIdx"]);
-      clearAutoStamp(day, idx); // jede Interaktion mit dem Feld gilt als Bestätigung
+      clearAutoStamp(day, idx); // eine tatsächliche Änderung der Zeit gilt als Prüfung
       if(val===""){
         // Eine geleerte Zeit, die nicht die letzte ist, würde eine Lücke reißen -> Feld ganz entfernen.
         if(idx!==stamps.length-1){ stamps.splice(idx,1); reindexAutoAfterSplice(day, idx); }
         else { stamps[idx]=""; }
       } else {
-        if(stamps[idx]===val && !wasAuto) return; // unverändert -> kein Re-Render nötig
         stamps[idx]=val;
       }
       trimTrailingEmptyStamps(day);
       recordDayEdit(k,"Zeit",before);
       markDirty(); renderHeute(); renderMiniPlayer();
     });
+  });
+  list.querySelectorAll(".stamp-confirm").forEach(el=>{
+    el.addEventListener("click",()=>{ if(confirmAutoStamp(k,Number(el.dataset.idx))){ renderHeute(); renderMiniPlayer(); } });
   });
   list.querySelectorAll(".stamp-del").forEach(el=>{
     el.addEventListener("click",()=>{
@@ -1455,6 +1460,25 @@ function markAutoStamp(day, idx){
 function clearAutoStamp(day, idx){
   if(day.autoIdx) day.autoIdx = day.autoIdx.filter(i=>i!==idx);
 }
+function uncheckedStampCount(){
+  return Object.values(state.days||{}).reduce((sum,day)=>sum+(day.autoIdx||[]).filter(i=>String((day.stamps||[])[i]||"").trim()).length,0);
+}
+// Nur diese Aktion (oder eine tatsächliche Änderung der Zeit) bestätigt eine automatisch eingetragene Zeit.
+function confirmAutoStamp(key, idx){
+  const day=state.days[key];
+  if(!day || !(day.autoIdx||[]).includes(idx)) return false;
+  const before=captureDayEdit(day,["autoIdx"]);
+  clearAutoStamp(day, idx);
+  recordDayEdit(key,"Prüfung",before);
+  markDirty();
+  return true;
+}
+function renderUncheckedHint(){
+  if(typeof document==="undefined" || !state) return;
+  const n=uncheckedStampCount(), text=n?`${n} automatisch eingetragene Zeit${n===1?"":"en"} noch ungeprüft`:"";
+  ["heuteUnchecked","monatUnchecked"].forEach(id=>{ const el=document.getElementById(id); if(el){ el.hidden=!n; el.textContent=text; } });
+  document.getElementById("dotUnchecked")?.classList.toggle("show",n>0);
+}
 function reindexAutoAfterSplice(day, removedIdx){
   if(day.autoIdx) day.autoIdx = day.autoIdx.filter(i=>i!==removedIdx).map(i=>i>removedIdx?i-1:i);
 }
@@ -1474,11 +1498,18 @@ async function doGehen(feierabend){
   const k = todayKey();
   const d=ensureDay(k);
   trimTrailingEmptyStamps(d);
-  if(!isDayOpen(d)){ toast("Bitte zuerst „Kommt“ stempeln.", "warn"); return; }
-  // Zwischen-Geht: exakt jetzt. Feierabend: Nachlauf-Offset (Weg vom Platz zur Stempeluhr).
-  const t = feierabend ? addMinutesToTimeStr(nowTimeStr(), state.settings.stempelOffsetGehenMin||0) : nowTimeStr();
-  d.stamps.push(t);
-  activeTaskPause(); // laufender Auftrag wird in beiden Fällen pausiert
+  // Feierabend nach erneutem Öffnen: das vorhandene Geht bleibt unverändert, es wird nur beendet, gespeichert und geschlossen.
+  const alreadyGone = feierabend && !isDayOpen(d) && d.stamps.some(x=>String(x||"").trim());
+  if(!isDayOpen(d) && !alreadyGone){ toast("Bitte zuerst „Kommt“ stempeln.", "warn"); return; }
+  let t = d.stamps.at(-1);
+  if(!alreadyGone){
+    // Zwischen-Geht: exakt jetzt. Feierabend: Nachlauf-Offset (Weg vom Platz zur Stempeluhr).
+    t = feierabend ? addMinutesToTimeStr(nowTimeStr(), state.settings.stempelOffsetGehenMin||0) : nowTimeStr();
+    d.stamps.push(t);
+    // Automatisch bei Feierabend eingetragenes Geht bleibt rot, bis es geprüft/bestätigt wird.
+    if(feierabend) markAutoStamp(d, d.stamps.length-1);
+  }
+  if(state.tasks.some(x=>x.status==="in Arbeit")) activeTaskPause(); // laufender Auftrag wird in beiden Fällen pausiert
   markDirty(); renderHeute(); renderMiniPlayer();
   if(!feierabend){ toast("Geht gestempelt: "+t+". Mit „Kommt“ geht es weiter."); return; }
   if(fileWriteTimer){ clearTimeout(fileWriteTimer); fileWriteTimer=null; }
@@ -2005,9 +2036,10 @@ function buildTimesCellHTML(k, day){
   const ac = i => (autoIdx.includes(i) ? "auto-pending" : "") + (missingGeht && i===stamps.length ? " missing-stamp" : "") + (planned && i===stamps.length ? " planned-geht" : "");
   const val = i => (stamps[i] || (planned && i===stamps.length ? planned : ""));
   const attr = i => (planned && i===stamps.length ? ` data-planned="${planned}" title="Vorschlag laut Geht-Empfehlung (nicht gestempelt)"` : "");
+  const confirmBtn = i => autoIdx.includes(i) && String(stamps[i]||"").trim() ? `<button type="button" class="stamp-confirm" data-day="${k}" data-idx="${i}" title="Automatisch eingetragen – Zeit prüfen, dann mit ✓ bestätigen" aria-label="Zeit als geprüft bestätigen">✓</button>` : "";
   const pairs=[];
   for(let i=0;i<Math.max(2,stamps.length);i+=2){
-    pairs.push(`<span class="time-pair"><input type="time" lang="de-DE" class="time-stamp ${ac(i)}" data-day="${k}" data-idx="${i}" value="${val(i)}"${attr(i)}><span>–</span><input type="time" lang="de-DE" class="time-stamp ${ac(i+1)}" data-day="${k}" data-idx="${i+1}" value="${val(i+1)}"${attr(i+1)}></span>`);
+    pairs.push(`<span class="time-pair"><input type="time" lang="de-DE" class="time-stamp ${ac(i)}" data-day="${k}" data-idx="${i}" value="${val(i)}"${attr(i)}>${confirmBtn(i)}<span>–</span><input type="time" lang="de-DE" class="time-stamp ${ac(i+1)}" data-day="${k}" data-idx="${i+1}" value="${val(i+1)}"${attr(i+1)}>${confirmBtn(i+1)}</span>`);
   }
   const html = `<div class="times-wrap" data-day="${k}"><div class="time-row time-rows-stacked">${pairs.map((p,idx)=>idx===pairs.length-1?`<span class="time-line-last">${p}<button type="button" class="time-add" data-day="${k}"${open?" disabled title=\"Bitte zuerst Geht eintragen\"":""}>+ Zeit</button></span>`:p).join('')}</div></div>`;
   return html;
@@ -2127,19 +2159,21 @@ function renderMonat(){
       if(e.target.dataset.planned && val===e.target.dataset.planned && st[idx]===undefined) return; // unveränderter Vorschlag: nichts speichern
       const before=captureDayEdit(d,["stamps","autoIdx"]);
       while(st.length<=idx) st.push("");
-      const wasAuto = (d.autoIdx||[]).includes(idx);
-      clearAutoStamp(d, idx);
+      if(val!=="" && st[idx]===val) return; // bloßes Anklicken bestätigt nichts; dafür gibt es „✓“
+      clearAutoStamp(d, idx); // eine tatsächliche Änderung der Zeit gilt als Prüfung
       if(val===""){
         if(idx!==st.length-1){ st.splice(idx,1); reindexAutoAfterSplice(d, idx); }
         else { st[idx]=""; }
       } else {
-        if(st[idx]===val && !wasAuto) return;
         st[idx]=val;
       }
       trimTrailingEmptyStamps(d);
       recordDayEdit(dk,"Zeit",before);
       markDirty(); renderMonat(); renderMiniPlayer();
     });
+  });
+  tbody.querySelectorAll(".stamp-confirm").forEach(el=>{
+    el.addEventListener("click",()=>{ if(confirmAutoStamp(el.dataset.day,Number(el.dataset.idx))){ renderMonat(); renderMiniPlayer(); } });
   });
   tbody.querySelectorAll(".time-del").forEach(el=>{
     el.addEventListener("click",(e)=>{
