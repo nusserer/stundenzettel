@@ -188,6 +188,21 @@
   td.warnflag{color:var(--rust); font-weight:700; text-align:center;}
   .tablewrap{overflow:auto; max-height:74vh; border:1px solid var(--line); border-radius:var(--radius);}
   #view-monat .tablewrap,#view-jahr .tablewrap{overflow:visible;max-height:none;}
+  /* Unter 1280 CSS-px (gestapeltes Layout) scrollt nur die breite Tabelle selbst seitlich – nicht die ganze Seite. */
+  #view-monat .monat-col-main,#view-jahr .jahr-grid>*{min-width:0;}
+  @media (max-width:1279px){
+    #view-monat .tablewrap,#view-jahr .tablewrap{overflow-x:auto;}
+    .view-head,.view-actions{max-width:100%;}
+    .zoom-ctl{flex-wrap:wrap;}
+  }
+  /* Schmale Telefone: Raster einspaltig, Werte dürfen umbrechen, damit nichts über den Rand läuft. */
+  @media (max-width:640px){
+    .grid.cols2,.grid.cols3,.grid.cols4{grid-template-columns:minmax(0,1fr);}
+    #main{padding-left:14px;padding-right:14px;}
+    table.compact-kv td.val,table.compact-kv td.lbl{white-space:normal;}
+    .set-ctl.calc-inline{flex-wrap:wrap;}
+    .set-label,.set-ctl{min-width:0;}
+  }
   #view-monat .monat-layout{display:grid;grid-template-columns:minmax(min-content,2.1fr) minmax(330px,1fr);gap:14px;align-items:start;}
   #view-monat .monat-col-side{display:block;max-width:none;width:100%;min-width:0;}
   #view-monat .panel,#view-jahr .panel{margin-bottom:12px;padding:12px 14px;}

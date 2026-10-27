@@ -96,3 +96,22 @@ test('Mini-Player-Beschriftung aktualisiert sich ohne das Symbol zu entfernen', 
   assert.equal(label.textContent, '🗗 Mini-Player im Vordergrund');
   assert.equal(button.attributes['aria-label'], 'Mini-Player im Vordergrund');
 });
+
+test('Ohne gespeicherte Wahl startet die Leiste auf schmalen Bildschirmen eingeklappt, eine gespeicherte Wahl gewinnt', () => {
+  const narrow = (saved, matches) => {
+    const classes = new Set(), button = { setAttribute() {}, addEventListener() {} };
+    const store = new Map(saved === null ? [] : [[key, saved]]);
+    const start = source.indexOf('/* SIDEBAR_TOGGLE_START */'), end = source.indexOf('/* SIDEBAR_TOGGLE_END */', start);
+    vm.runInNewContext(source.slice(start, end), {
+      document: { body: { classList: { toggle(n, on) { on ? classes.add(n) : classes.delete(n); }, contains: n => classes.has(n) } },
+        getElementById: id => id === 'btnToggleRail' ? button : { hidden: true, setAttribute() {} } },
+      localStorage: { getItem: n => store.get(n) ?? null, setItem() {} },
+      matchMedia: () => ({ matches })
+    });
+    return classes.has('rail-collapsed');
+  };
+  assert.equal(narrow(null, true), true);
+  assert.equal(narrow(null, false), false);
+  assert.equal(narrow('false', true), false);
+  assert.equal(narrow('true', false), true);
+});

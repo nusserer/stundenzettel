@@ -1169,8 +1169,10 @@ function glzTageVerfuegbar(){
     document.getElementById("railYearBtn").setAttribute("aria-expanded","false");
     if(persist){ try{ localStorage.setItem(KEY,String(collapsed)); }catch(e){} }
   }
-  let collapsed=false;
-  try{ collapsed=localStorage.getItem(KEY)==="true"; }catch(e){}
+  let collapsed=false, saved=null;
+  try{ saved=localStorage.getItem(KEY); }catch(e){}
+  // Ohne gespeicherte Wahl startet die Leiste auf schmalen Telefonen eingeklappt, damit der Inhalt Platz hat.
+  collapsed = saved===null ? Boolean(typeof matchMedia==="function" && matchMedia("(max-width:640px)").matches) : saved==="true";
   apply(collapsed, false);
   button.addEventListener("click",()=>apply(!document.body.classList.contains("rail-collapsed"), true));
 })();
