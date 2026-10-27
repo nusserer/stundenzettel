@@ -27,14 +27,9 @@ function scheduler(time = '12:14:00') {
   vm.runInContext(part('function logCloseActive(', '/* Störung beenden:'), app);
   vm.runInContext(part('function resumeLatestTaskOnOpen()', '/* ---------------- URLAUB'), app);
   vm.runInContext(part('function scheduledBreakState()', 'function initAutoScheduler()'), app);
-  vm.runInContext(part('function doPauseStop()', '/* ---------------- Mini-Player'), app);
   app.ensureTodayYear = () => true;
   app.ensureDay = key => app.run('state.days[' + JSON.stringify(key) + ']');
   app.renderHeute = () => {};
-  app.activeTaskResume = () => {
-    const id = app.run('state.tasks.find(t=>t.status==="Pause")?.id');
-    if (id) app.taskStart(id);
-  };
   app.run(`state.days['2026-10-26']={stamps:['07:00'],pause:'',dayPauses:[]};
     state.tasks=[{id:1,kind:'auftrag',orderNr:'Prüfauftrag',status:'in Arbeit',activeSince:new Date('2026-10-26T07:00:00').toISOString()}];`);
   app.tick = value => { app.setNow('2026-10-26T' + value); app.checkAutoStamps(); };
@@ -79,17 +74,6 @@ test('Erneutes Öffnen startet während der automatischen Pause keinen Auftrag',
   app.run('state=normalizeState(JSON.parse(JSON.stringify(state)))');
   app.tick('12:46:00');
   assert.equal(app.run('state.tasks[0].status'), 'in Arbeit');
-});
-
-test('Manuelles Beenden der automatischen Pause setzt nicht einen fremden pausierten Auftrag fort', () => {
-  const app = scheduler();
-  app.run("state.tasks.unshift({id:2,kind:'auftrag',orderNr:'Alt',status:'Pause',activeSince:null})");
-  app.tick('12:16:00');
-  app.doPauseStop();
-  assert.equal(app.run('state.tasks.find(t=>t.id===1).status'), 'in Arbeit');
-  assert.equal(app.run('state.tasks.find(t=>t.id===2).status'), 'Pause');
-  app.tick('12:46:00');
-  assert.equal(app.run('state.tasks.find(t=>t.id===1).activeSince'), new Date('2026-10-26T12:16:00').toISOString());
 });
 
 test('In der Pause gewählter anderer Auftrag bleibt pausiert und startet erst zum Pausenende', () => {

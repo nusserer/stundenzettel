@@ -813,7 +813,7 @@ function calcPauseMinutes(day, dateObj, holiday, liveNow){
   //    Tagesgruppe ohne feste Pausen (z. B. Sa/So) = Pausenlänge der Tagesgruppe.
   const groupHasBreaks = (r.breaks[dayGroup(dateObj)] || []).length > 0;
   const standard = holiday ? (Number(r.pause.holiday) || 0) : (groupHasBreaks ? fixedBreakMinutes(dateObj) : (Number(r.pause[dayGroup(dateObj)]) || 0));
-  // 3) Mit dem Pause-Button erfasste Tagespausen verlängern die Pause, wenn sie länger sind.
+  // 3) Bereits protokollierte (ältere, manuelle) Tagespausen verlängern die Pause, wenn sie länger sind.
   // Automatisch protokollierte Regelpausen sind bereits im Standard enthalten.
   const logged = (Array.isArray(day.dayPauses) && day.dayPauses.length && window.StundenzettelDayPause) ? StundenzettelDayPause.minutes(day, liveNow, {excludeScheduled:true}) : 0;
   let pause = Math.max(standard, logged);
@@ -1417,8 +1417,6 @@ function renderHeute(){
   document.getElementById("btnKommen").onclick=doKommen;
   document.getElementById("btnGehen").onclick=()=>doGehen(false);
   document.getElementById("btnFeierabend").onclick=doFeierabend;
-  document.getElementById("btnPauseStart").onclick=doPauseStart;
-  document.getElementById("btnPauseStop").onclick=doPauseStop;
 
   renderHeuteAuftrag();
   renderHeuteHistorie(k);
@@ -1529,32 +1527,6 @@ function openCloseAppDialog(){
   document.getElementById("closeWithFeierabend").onclick=()=>{ closeModal(); doFeierabend(); };
   document.getElementById("closeCancel").onclick=closeModal;
 }
-function doPauseStart(){
-  if(!ensureTodayYear()) return;
-  const day = ensureDay(todayKey());
-  try {
-    if(window.StundenzettelDayPause) StundenzettelDayPause.start(day, new Date().toISOString(), 'manual');
-    activeTaskPause();
-    markDirty(); renderHeute(); renderMiniPlayer();
-  } catch(error) { toast(error.message, 'warn'); }
-}
-function doPauseStop(){
-  if(!ensureTodayYear()) return;
-  const day = ensureDay(todayKey());
-  try {
-    const open=(day.dayPauses||[]).findLast(p=>!p.end);
-    if(open?.scheduledBreakId){
-      const entry=scheduledBreakState()[open.scheduledBreakId];
-      if(entry) finishScheduledPause(day,open.scheduledBreakId,entry,new Date().toISOString());
-      else StundenzettelDayPause.end(day,new Date().toISOString(),'manual');
-    } else {
-      if(window.StundenzettelDayPause) StundenzettelDayPause.end(day, new Date().toISOString(), 'manual');
-      activeTaskResume();
-    }
-    markDirty(); renderHeute(); renderMiniPlayer();
-  } catch(error) { toast(error.message, 'warn'); }
-}
-
 /* ---------------- Mini-Player (Document Picture-in-Picture) ---------------- */
 let pipWindow = null;
 function pipSupported(){ return "documentPictureInPicture" in window; }
@@ -1596,7 +1568,6 @@ async function openMiniPlayer(auto){
       background:var(--ink); color:#fff; cursor:pointer;}
     button.secondary{background:#fff; color:var(--ink); border:1px solid var(--line);}
     button:disabled{opacity:.4; cursor:default;}
-    #ppPauseToggle{width:100%; margin-top:6px; font-size:11px; padding:5px 6px;}
     .pp-alert{display:none; margin-top:8px; padding:7px 9px; border-radius:3px; font-size:11.5px; font-weight:700; cursor:pointer;}
     .pp-alert.show{display:block; animation:pp-pulse 1s ease-in-out infinite;}
     .pp-alert.warn{background:#fdf2df; color:#7a5311; border:1px solid var(--amber);}
@@ -1639,7 +1610,6 @@ async function openMiniPlayer(auto){
       <button id="ppGehen" class="secondary">Geht</button>
       <button id="ppFeierabend" class="secondary">Feierabend</button>
     </div>
-    <button id="ppPauseToggle" class="secondary" disabled>Pause</button>
     <div class="pp-alert" id="ppAlert"></div>
     <div class="pp-projLabel">Zuletzt bearbeitet — Klick zum Umstempeln</div>
     <div class="pp-projects" id="ppProjects"></div>
@@ -1831,16 +1801,6 @@ function renderMiniPlayer(){
   const fBtn = doc.getElementById("ppFeierabend"); if(fBtn) fBtn.disabled = !isDayOpen(d);
 
   const active = state.tasks.find(t=>t.status==="in Arbeit");
-  const openPause=(d.dayPauses||[]).findLast(p=>!p.end);
-  const pausing = openPause?.scheduledBreakId?state.tasks.find(t=>t.id===openPause.resumeTaskId):state.tasks.find(t=>t.status==="Pause");
-  const pauseBtn = doc.getElementById("ppPauseToggle");
-  if(pauseBtn){
-    if(active){ pauseBtn.textContent="⏸ Pause ("+(active.orderNr||"ohne Nr.")+")"; pauseBtn.disabled=false; pauseBtn.onclick=doPauseStart; }
-    else if(openPause){ pauseBtn.textContent=pausing?"▶ Weiter ("+(pausing.orderNr||"ohne Nr.")+")":"▶ Pause beenden"; pauseBtn.disabled=false; pauseBtn.onclick=doPauseStop; }
-    else if(pausing){ pauseBtn.textContent="▶ Weiter ("+(pausing.orderNr||"ohne Nr.")+")"; pauseBtn.disabled=false; pauseBtn.onclick=()=>{ activeTaskResume(); markDirty(); renderHeute(); renderMiniPlayer(); }; }
-    else { pauseBtn.textContent="Pause"; pauseBtn.disabled=true; pauseBtn.onclick=null; }
-  }
-
   const projBox = doc.getElementById("ppProjects");
   if(projBox){
     const list = recentTasksList(5);
