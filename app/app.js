@@ -134,6 +134,11 @@ function computeHolidays(year){
 
 /* ---------------- Default state ---------------- */
 /* Pausen- und Kernzeitregeln je Tagesgruppe: moDo = Mo–Do, fr = Freitag, sa = Samstag/Sonntag. Pro Person einstellbar. */
+/* FRI_ADJUST_START */
+// Anzeige/Eingabe: −2 = Freitag 2 h kürzer. Gespeichert wird weiterhin die positive Kürzung (friAdjustWeek/WZ), daher keine Datenmigration.
+function friAdjustToInput(stored){ const v=-(Number(stored)||0); return v===0?0:v; }
+function friAdjustToStored(input){ const v=-(Number(String(input==null?"":input).replace(",","."))||0); return v===0?0:v; }
+/* FRI_ADJUST_END */
 function defaultRules(){
   return {
     pause: {moDo:45, fr:30, sa:30, holiday:30},       // Minuten, wenn nicht anders eingetragen
@@ -2283,13 +2288,13 @@ function renderGehtPanel(monthIdx){
   document.getElementById("mKaTarget").onchange=(e)=>{ adj.kaTarget=Number(e.target.value)||0; markDirty(); renderMonat(); };
   document.getElementById("gFreeMoDo").value = g.freeGoalMoDo;
   document.getElementById("gFreeFr").value = g.freeGoalFr;
-  document.getElementById("gFriAdjust").value = g.friAdjustWeek;
+  document.getElementById("gFriAdjust").value = friAdjustToInput(g.friAdjustWeek);
   const wishEl=document.getElementById("gWunschGeht");
   wishEl.value=g.wunschGeht||"";
   wishEl.disabled=!isNow;
   document.getElementById("gFreeMoDo").onchange=(e)=>{ g.freeGoalMoDo=Number(e.target.value)||0; markDirty(); renderMonat(); };
   document.getElementById("gFreeFr").onchange=(e)=>{ g.freeGoalFr=Number(e.target.value)||0; markDirty(); renderMonat(); };
-  document.getElementById("gFriAdjust").onchange=(e)=>{ g.friAdjustWeek=Number(e.target.value)||0; g.friAdjustWZ=g.friAdjustWeek; markDirty(); renderMonat(); };
+  document.getElementById("gFriAdjust").onchange=(e)=>{ g.friAdjustWeek=friAdjustToStored(e.target.value); g.friAdjustWZ=g.friAdjustWeek; markDirty(); renderMonat(); };
   wishEl.onchange=(e)=>{
     g.wunschGeht=e.target.value;
     if(applyWishGehtTime(g.wunschGeht)) renderMonat(); else markDirty();
