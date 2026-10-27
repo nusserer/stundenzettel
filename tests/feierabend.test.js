@@ -90,3 +90,64 @@ test('Feierabend ohne jede Stempelung schließt nicht und verlangt Kommt', async
   assert.equal(app.saves, 0);
   assert.equal(app.toasts.at(-1).kind, 'warn');
 });
+
+function kommtApp(stamps = ['07:00']) {
+  const app = feierabendApp(stamps);
+  vm.runInContext(part('function doKommen()', 'async function doGehen('), app);
+  vm.runInContext(part('function activeTaskPause()', 'function resumeLatestTaskOnOpen()'), app);
+  vm.runInContext(part('function taskStart(', 'function taskPause('), app);
+  vm.runInContext(part('function taskPause(', '/* Störung beenden:'), app);
+  app.run('function todayKey(){return "2026-10-26"}');
+  return app;
+}
+
+test('Kommt setzt den durch Geht pausierten Auftrag fort', async () => {
+  const app = kommtApp();
+  await app.doGehen(false);
+  assert.equal(app.run('state.tasks[0].status'), 'Pause');
+  app.setNow('2026-10-26T17:30:00');
+  app.doKommen();
+  assert.equal(app.run('state.tasks[0].status'), 'in Arbeit');
+  assert.equal(app.run('state.tasks[0].activeSince'), new Date('2026-10-26T17:30:00').toISOString());
+  assert.equal(app.run('state.ui.pausedByGehen'), null);
+});
+
+test('Kommt startet ohne vorheriges Geht-Pausieren keinen Auftrag', () => {
+  const app = kommtApp([]);
+  app.run("state.tasks[0].status='Pause';state.tasks[0].activeSince=null");
+  app.doKommen();
+  assert.equal(app.run('state.tasks[0].status'), 'Pause');
+});
+
+test('Kommt setzt einen inzwischen fertigen oder von gestern stammenden Auftrag nicht fort', async () => {
+  const done = kommtApp();
+  await done.doGehen(false);
+  done.run("state.tasks[0].status='fertig'");
+  done.doKommen();
+  assert.equal(done.run('state.tasks[0].status'), 'fertig');
+  const old = kommtApp();
+  await old.doGehen(false);
+  old.run("state.ui.pausedByGehen.date='2026-10-25'");
+  old.doKommen();
+  assert.equal(old.run('state.tasks[0].status'), 'Pause');
+});
+
+test('Kommt überschreibt keinen inzwischen manuell gestarteten anderen Auftrag', async () => {
+  const app = kommtApp();
+  app.run("state.tasks.push({id:2,kind:'auftrag',orderNr:'Anderer',status:'warten',activeSince:null})");
+  await app.doGehen(false);
+  app.run("state.tasks[1].status='in Arbeit';state.tasks[1].activeSince=new Date('2026-10-26T17:10:00').toISOString()");
+  app.doKommen();
+  assert.equal(app.run('state.tasks[0].status'), 'Pause');
+  assert.equal(app.run('state.tasks[1].status'), 'in Arbeit');
+});
+
+test('Kommt während der automatischen Pause verschiebt den Start auf das Pausenende', async () => {
+  const app = kommtApp();
+  await app.doGehen(false);
+  app.run(`state.days['2026-10-26'].dayPauses=[{start:new Date('2026-10-26T12:15:00').toISOString(),end:'',source:'scheduled',scheduledBreakId:'x',resumeTaskId:1}];
+    state.ui.scheduledBreaks={x:{pauseStarted:true,pauseEnded:false,resumeTaskId:1,resumeStatus:'Pause',date:'2026-10-26',endAt:new Date('2026-10-26T12:45:00').toISOString()}}`);
+  app.doKommen();
+  assert.equal(app.run('state.tasks[0].status'), 'Pause');
+  assert.equal(app.run('state.tasks[0].activeSince'), null);
+});

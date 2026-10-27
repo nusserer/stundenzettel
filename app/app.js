@@ -1488,7 +1488,15 @@ function doKommen(){
   if(isDayOpen(d)){ toast("Es ist noch eine offene „Kommt“-Stempelung ohne „Geht“ vorhanden."); return; }
   const t = nowTimeStr(); // manuell: exakt jetzt, ohne Vorlauf
   d.stamps.push(t);
-  markDirty(); renderHeute(); renderMiniPlayer(); toast("Kommt gestempelt: "+t);
+  // Der durch „Geht“ pausierte Auftrag läuft weiter – nur am selben Tag und wenn inzwischen nichts anderes läuft.
+  const marker=state.ui.pausedByGehen, resumed=marker && marker.date===k ? state.tasks.find(x=>x.id===marker.id) : null;
+  state.ui.pausedByGehen=null;
+  let resumeText="";
+  if(resumed && resumed.status!=="fertig" && !resumed.activeSince && !state.tasks.some(x=>x.status==="in Arbeit")){
+    taskStart(resumed.id);
+    resumeText=resumed.status==="in Arbeit" ? " – Auftrag „"+(resumed.orderNr||"(ohne Nr.)")+"“ läuft weiter." : " – Auftrag „"+(resumed.orderNr||"(ohne Nr.)")+"“ startet nach der Pause.";
+  }
+  markDirty(); renderHeute(); renderMiniPlayer(); toast("Kommt gestempelt: "+t+resumeText);
 }
 async function doGehen(feierabend){
   if(!ensureTodayYear()) return;
@@ -1507,7 +1515,11 @@ async function doGehen(feierabend){
     // Automatisch bei Feierabend eingetragenes Geht bleibt rot, bis es geprüft/bestätigt wird.
     if(feierabend) markAutoStamp(d, d.stamps.length-1);
   }
-  if(state.tasks.some(x=>x.status==="in Arbeit")) activeTaskPause(); // laufender Auftrag wird in beiden Fällen pausiert
+  const running=state.tasks.find(x=>x.status==="in Arbeit");
+  if(running){
+    activeTaskPause(); // laufender Auftrag wird in beiden Fällen pausiert
+    state.ui.pausedByGehen={id:running.id,date:todayKey()}; // „Kommt“ setzt genau diesen Auftrag fort
+  }
   markDirty(); renderHeute(); renderMiniPlayer();
   if(!feierabend){ toast("Geht gestempelt: "+t+". Mit „Kommt“ geht es weiter."); return; }
   if(fileWriteTimer){ clearTimeout(fileWriteTimer); fileWriteTimer=null; }
