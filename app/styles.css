@@ -699,3 +699,6 @@ dialog.check-dlg{width:min(760px,94vw); max-height:88vh; overflow:auto;}
 .check-btn[hidden]{display:none;}
 button.linklike{background:none; border:none; padding:0; color:#7b4b0b; text-decoration:underline; cursor:pointer; font:inherit; font-size:12.5px;}
 .check-older{margin:4px 0 2px; font-size:12px; color:var(--ink-soft);}
+/* Kalenderwochen: Liste scrollt im Rahmen, statt über die Nachbarbereiche zu ragen */
+#view-jahr .jahr-wochen .tablewrap{overflow:auto; max-height:420px;}
+.jahr-wochen{min-width:0;}

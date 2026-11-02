@@ -36,7 +36,7 @@
   }
 
   function findIssues(options) {
-    const { days = {}, tasks = [], log = [], today, now: nowOpt, isHoliday = () => false, ignored = [], evaluation: evaluated = null } = options;
+    const { days = {}, tasks = [], log = [], today, now: nowOpt, isHoliday = () => false, ignored = [], evaluation: evaluated = null, fillInfo = null } = options;
     const now = nowOpt instanceof Date ? nowOpt : new Date(nowOpt || Date.now());
     const skip = new Set(ignored), issues = [];
     const add = issue => { if (!skip.has(issue.id)) issues.push(issue); };
@@ -129,6 +129,41 @@
       const idv = 'overlap:' + A.e.taskId + '@' + A.e.start + '|' + B.e.taskId + '@' + B.e.start;
       add({ id: idv, type: 'overlap', key: first, taskId: A.e.taskId, text: label(A.e) + ' und ' + label(B.e) + ' überlappen am ' + first.slice(8) + '.' + first.slice(5, 7) + '. um ' + minutes + ' min',
         detail: 'Die Zeit wird auf beide verteilt. Im Protokoll das Ende bzw. den Beginn eines Eintrags anpassen.', fix: null });
+    }
+
+    // 7) Vergangene Arbeitstage ohne jede Auftragszeit (z. B. App nicht gestartet): zuletzt benutzten Auftrag für die Anwesenheit eintragen
+    if (fillInfo) {
+      const firstLogStart = Math.min(...entries.filter(x => !x.running).map(x => x.a), Infinity);
+      for (const k of keys) {
+        if (!(k < today) || k.slice(0, 4) !== year) continue;
+        const day = days[k], st = stampsOf(day);
+        if (st.length < 2 || st.length % 2 || day.code || st.some(t => !isTime(t))) continue;
+        const dayStart = atTime(k, '00:00').getTime();
+        if (!(dayStart > firstLogStart)) continue;
+        const pairs = []; let crosses = false;
+        for (let i = 0; i < st.length; i += 2) { const a = toMin(st[i]), b = toMin(st[i + 1]); if (b <= a) crosses = true; else pairs.push([a, b]); }
+        if (crosses || !pairs.length) continue;
+        const covered = pairs.some(([a, b]) => entries.some(x => x.a < dayStart + b * 60000 && x.b > dayStart + a * 60000));
+        if (covered) continue;
+        const kommt = dayStart + pairs[0][0] * 60000;
+        const prev = entries.filter(x => !x.running && x.b <= kommt && x.e.art !== 'stoerung').sort((x, y) => y.b - x.b)[0];
+        const task = prev && tasks.find(t => t.id === prev.e.taskId);
+        let segs = pairs.map(p => p.slice());
+        for (const w of (fillInfo.breaks(k) || [])) segs = segs.flatMap(([a, b]) => (w.e <= a || w.s >= b) ? [[a, b]] : [[a, Math.max(a, w.s)], [Math.min(b, w.e), b]].filter(x => x[1] > x[0]));
+        const net = fillInfo.net(k);
+        if (Number.isFinite(net)) {
+          let over = segs.reduce((n, x) => n + x[1] - x[0], 0) - net;
+          for (let i = segs.length - 1; i >= 0 && over > 0; i--) { const cut = Math.min(over, segs[i][1] - segs[i][0]); segs[i][1] -= cut; over -= cut; }
+        }
+        segs = segs.filter(x => x[1] - x[0] >= 1);
+        if (!segs.length) continue;
+        const total = segs.reduce((n, x) => n + x[1] - x[0], 0), hm = pad(Math.floor(total / 60)) + ':' + pad(total % 60);
+        const usable = task && task.status !== 'fertig';
+        add({ id: 'noorder:' + k, type: 'no-order-time', key: k, taskId: usable ? task.id : null,
+          text: 'Keine Auftragszeit am ' + k.slice(8) + '.' + k.slice(5, 7) + '. (Anwesenheit ' + st[0] + '–' + st[st.length - 1] + ')',
+          detail: usable ? 'Zuletzt benutzten Auftrag „' + (task.orderNr || '(ohne Nr.)') + '“ für ' + hm + ' h eintragen? (Netto, ohne Pausen)' : 'Es gibt keinen zuletzt benutzten, offenen Auftrag zum Eintragen.',
+          fix: usable ? { kind: 'fillDay', key: k, taskId: task.id, segments: segs.map(([a, b]) => ({ start: new Date(dayStart + a * 60000).toISOString(), stop: new Date(dayStart + b * 60000).toISOString() })) } : null });
+      }
     }
 
     // 6) Tage, an denen die Auftragszeit anteilig geschätzt wurde

@@ -3282,7 +3282,11 @@ function computeAllChecks(fresh){
   if(!state || !window.StundenzettelDataCheck) return [];
   if(!fresh && checkCache && checkCache.state===state && checkCache.rev===taskEvaluationRevision && Date.now()-checkCache.at<60000) return checkCache.list;
   const list=StundenzettelDataCheck.findIssues({days:state.days, tasks:state.tasks, log:state.log, today:todayKey(), now:new Date(),
-    isHoliday:k=>!!isHolidayOn(k), ignored:state.ui.checkIgnored||[], evaluation:getTaskEvaluation()});
+    isHoliday:k=>!!isHolidayOn(k), ignored:state.ui.checkIgnored||[], evaluation:getTaskEvaluation(),
+    fillInfo:{
+      breaks:k=>{ const d=keyToDate(k), g=dayGroup(d); return (isHolidayOn(k)||g==="sa") ? [] : breakWindows(rulesOf().breaks[g]); },
+      net:k=>Math.round((calcDay(k,true).ist||0)*60)
+    }});
   checkCache={state, rev:taskEvaluationRevision, at:Date.now(), list};
   return list;
 }
@@ -3299,8 +3303,8 @@ function renderCheckBadge(){
   const m=document.getElementById("btnMonatCheck"); if(m){ m.hidden=!n; m.textContent=text; }
   const hl=document.getElementById("heuteCheck"); if(hl){ hl.hidden=!n; const b=document.getElementById("btnHeuteCheck"); if(b) b.textContent=text+" ansehen"; }
 }
-const CHECK_GROUPS=[["Aufträge",["order-running","log-outside","start-gap","overlap","estimate"]],["Stempelzeiten",["open-day","long-pair","missing-day"]]];
-function checkFixLabel(fix){ return fix.kind==="stopTask" ? "Ende setzen" : fix.kind==="trimLog" ? "Kürzen" : (fix.kind==="extendLog"||fix.kind==="extendTask") ? "Beginn vorziehen" : "Eintragen"; }
+const CHECK_GROUPS=[["Aufträge",["order-running","log-outside","start-gap","no-order-time","overlap","estimate"]],["Stempelzeiten",["open-day","long-pair","missing-day"]]];
+function checkFixLabel(fix){ return fix.kind==="stopTask" ? "Ende setzen" : fix.kind==="trimLog" ? "Kürzen" : (fix.kind==="extendLog"||fix.kind==="extendTask") ? "Beginn vorziehen" : fix.kind==="fillDay" ? "Auftragszeit eintragen" : "Eintragen"; }
 function renderCheckList(){
   const body=document.getElementById("checkBody"); if(!body) return;
   const issues=computeChecks(), olderCount=computeAllChecks(false).length-computeChecks().length;
@@ -3308,7 +3312,11 @@ function renderCheckList(){
     ...state.log.map((rec,index)=>({rec,index,id:index})).filter(x=>x.rec.autoTrim||x.rec.autoExtend),
     ...state.tasks.filter(t=>t.autoExtend && t.status==="in Arbeit").map(t=>({rec:{taskId:t.id,art:t.kind,orderNr:t.orderNr,start:t.activeSince,stop:null,autoExtend:t.autoExtend},id:"task:"+t.id}))
   ];
-  const autoText=({rec})=>rec.autoExtend ? "Beginn von "+localTimeFromIso(rec.autoExtend.from).slice(0,5)+" auf "+localTimeFromIso(rec.start).slice(0,5)+" vorgezogen (Kommt)" : (rec.autoTrim.from?"Ende von "+localTimeFromIso(rec.autoTrim.from).slice(0,5)+" auf "+localTimeFromIso(rec.stop).slice(0,5)+" gekürzt":"Lief weiter, Ende gesetzt auf "+localTimeFromIso(rec.stop).slice(0,5));
+  const autoText=({rec,fill})=>fill ? "Für die Anwesenheit eingetragen: "+Math.floor(fill.minutes/60)+" h "+String(fill.minutes%60).padStart(2,"0")+" min" : rec.autoExtend ? "Beginn von "+localTimeFromIso(rec.autoExtend.from).slice(0,5)+" auf "+localTimeFromIso(rec.start).slice(0,5)+" vorgezogen (Kommt)" : (rec.autoTrim.from?"Ende von "+localTimeFromIso(rec.autoTrim.from).slice(0,5)+" auf "+localTimeFromIso(rec.stop).slice(0,5)+" gekürzt":"Lief weiter, Ende gesetzt auf "+localTimeFromIso(rec.stop).slice(0,5));
+  const fillGroups=new Map();
+  state.log.forEach((rec,index)=>{ if(rec.autoFill){ const g=fillGroups.get(rec.autoFill.group)||{group:rec.autoFill.group,rec,first:rec,minutes:0}; g.minutes+=Math.round((new Date(rec.stop)-new Date(rec.start))/60000); fillGroups.set(rec.autoFill.group,g); } });
+  const fills=[...fillGroups.values()].map(g=>({rec:g.rec,id:"fill:"+g.group,fill:g}));
+  autos.push(...fills);
   const autoHtml=autos.length ? `<h3>Automatisch angepasst (${autos.length})</h3><ul class="check-list">${autos.map(x=>`<li data-auto="${x.id}">
       <div class="check-text"><strong>${escapeHtml((x.rec.art==="stoerung"?"Störung":"Auftrag")+" „"+(x.rec.orderNr||"(ohne Nr.)")+"“")}</strong><small>${autoText(x)} · ${fmtDateDE(dateKey(new Date(x.rec.start)))}</small></div>
       <div class="check-actions"><button type="button" class="secondary" data-auto-undo>Rückgängig</button><button type="button" class="secondary" data-auto-ok>OK</button></div></li>`).join("")}</ul>` : "";
@@ -3329,10 +3337,11 @@ function renderCheckList(){
   installFormattedInputs(body);
   const older=document.getElementById("checkOlder"); if(older) older.onclick=()=>{ checkShowOlder=!checkShowOlder; renderCheckList(); };
   body.querySelectorAll("li[data-auto]").forEach(li=>{
-    const raw=li.dataset.auto, index=raw.startsWith("task:")?raw:Number(raw);
+    const raw=li.dataset.auto, index=(raw.startsWith("task:")||raw.startsWith("fill:"))?raw:Number(raw);
     li.querySelector("[data-auto-undo]").onclick=()=>{ if(undoAutoTrim(index)){ markDirty(); renderAll(); renderCheckList(); } };
     li.querySelector("[data-auto-ok]").onclick=()=>{
-      if(typeof index==="string"){ const t=state.tasks.find(x=>x.id===Number(index.slice(5))); if(t) delete t.autoExtend; }
+      if(typeof index==="string" && index.startsWith("fill:")){ state.log.forEach(r=>{ if(r.autoFill && r.autoFill.group===index.slice(5)) delete r.autoFill; }); }
+      else if(typeof index==="string"){ const t=state.tasks.find(x=>x.id===Number(index.slice(5))); if(t) delete t.autoExtend; }
       else if(state.log[index]){ delete state.log[index].autoTrim; delete state.log[index].autoExtend; }
       markDirty(); renderCheckList(); };
   });
@@ -3340,7 +3349,7 @@ function renderCheckList(){
     const issue=issues.find(i=>i.id===li.dataset.id);
     li.querySelector("[data-check-open]").onclick=()=>{
       document.getElementById("checkDlg").close();
-      if(!issue.unchecked && ["order-running","log-outside","start-gap","overlap","estimate"].includes(issue.type)){ switchView("auftraege"); }
+      if(!issue.unchecked && ["order-running","log-outside","start-gap","no-order-time","overlap","estimate"].includes(issue.type)){ switchView("auftraege"); }
       else { currentMonthIdx=Number(issue.key.slice(5,7))-1; switchView("monat"); }
     };
     li.querySelector("[data-check-ignore]").onclick=()=>{
@@ -3395,6 +3404,11 @@ function autoTrimForDay(key){
   return done.length;
 }
 function undoAutoTrim(index){
+  if(typeof index==="string" && index.startsWith("fill:")){
+    const group=index.slice(5), before=state.log.length;
+    state.log=state.log.filter(r=>!(r.autoFill && r.autoFill.group===group));
+    state.ui.taskRevision=(state.ui.taskRevision||0)+1; return state.log.length<before;
+  }
   if(typeof index==="string" && index.startsWith("task:")){
     const t=state.tasks.find(x=>x.id===Number(index.slice(5))); if(!t||!t.autoExtend) return false;
     if(t.status==="in Arbeit") t.activeSince=t.autoExtend.from; delete t.autoExtend; return true;
@@ -3425,6 +3439,13 @@ function applyCheckFix(issue, li){
   if(fix.kind==="stopTask"){
     const t=stopRunningTask(fix.taskId, fix.stop, false); if(!t) return false;
     toast("„"+(t.orderNr||"(ohne Nr.)")+"“ pausiert, Ende "+localTimeFromIso(fix.stop).slice(0,5)+"."); return true;
+  }
+  if(fix.kind==="fillDay"){
+    const t=state.tasks.find(x=>x.id===fix.taskId); if(!t || t.status==="fertig") return false;
+    const group="fill-"+Date.now(), at=new Date().toISOString();
+    fix.segments.forEach(seg=>state.log.push({taskId:t.id, art:t.kind||"auftrag", orderNr:t.orderNr, modul:t.modul, station:t.station, aenderung:t.aenderung, start:seg.start, stop:seg.stop, autoFill:{at, group}}));
+    state.ui.taskRevision=(state.ui.taskRevision||0)+1;
+    toast("Auftragszeit für „"+(t.orderNr||"(ohne Nr.)")+"“ am "+fmtDateDE(fix.key)+" eingetragen."); return true;
   }
   if(fix.kind==="extendLog"){
     if(!extendLogStart(fix.logIndex, fix.start, false)) return false;

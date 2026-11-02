@@ -133,3 +133,25 @@ test('Geschätzte Tage aus der Auswertung werden gemeldet', () => {
   const e = findIssues({ ...base, days: { '2026-11-03': { stamps: ['07:00', '16:00'] } }, evaluation }).filter(i => i.type === 'estimate');
   assert.deepEqual(e.map(i => i.key), ['2026-11-03']);
 });
+
+const fillInfo = { breaks: k => [{ s: 9 * 60 + 15, e: 9 * 60 + 30 }, { s: 12 * 60 + 15, e: 12 * 60 + 45 }], net: () => 8 * 60 };
+
+test('Tag ohne Auftragszeit: zuletzt benutzter Auftrag für die Anwesenheit ohne Pausen', () => {
+  const days = { '2026-11-02': { stamps: ['07:00', '16:00'] }, '2026-11-03': { stamps: ['07:58', '17:00'] } };
+  const tasks = [{ id: 5, orderNr: 'A-1', status: 'Pause' }];
+  const log = [{ taskId: 5, art: 'auftrag', orderNr: 'A-1', start: iso(2, 8, 0), stop: iso(2, 16, 0) }];
+  const r = findIssues({ ...base, days, tasks, log, fillInfo }).find(i => i.type === 'no-order-time');
+  assert.ok(r); assert.equal(r.key, '2026-11-03'); assert.equal(r.fix.kind, 'fillDay'); assert.equal(r.fix.taskId, 5);
+  const mins = r.fix.segments.reduce((n, s) => n + (new Date(s.stop) - new Date(s.start)) / 60000, 0);
+  assert.equal(mins, 8 * 60);                                    // auf die Netto-IST-Zeit begrenzt
+  assert.equal(r.fix.segments.length >= 3, true);                // um die Pausen geteilt
+});
+
+test('Tag ohne Auftragszeit: nicht bei vorhandener Auftragszeit, ohne offenen Auftrag oder vor der ersten Nutzung', () => {
+  const days = { '2026-11-03': { stamps: ['07:58', '17:00'] } };
+  const covered = [{ taskId: 5, art: 'auftrag', start: iso(3, 9, 0), stop: iso(3, 10, 0) }];
+  assert.equal(findIssues({ ...base, days, tasks: [{ id: 5, status: 'Pause' }], log: covered, fillInfo }).some(i => i.type === 'no-order-time'), false);
+  const done = findIssues({ ...base, days: { ...days, '2026-11-02': { stamps: ['07:00', '16:00'] } }, tasks: [{ id: 5, status: 'fertig' }], log: [{ taskId: 5, art: 'auftrag', start: iso(2, 8, 0), stop: iso(2, 16, 0) }], fillInfo }).find(i => i.type === 'no-order-time');
+  assert.equal(done.fix, null);
+  assert.equal(findIssues({ ...base, days, tasks: [], log: [], fillInfo }).some(i => i.type === 'no-order-time'), false);
+});
