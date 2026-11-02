@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../app/app.js'), 'utf8');
-const a = source.indexOf('function normalizeTimeText('), b = source.indexOf('function clockText(', a);
+const a = source.indexOf('function normalizeTimeText('), b = source.indexOf('const formatKindOf', a);
 const ctx = vm.createContext({ localStorage: { getItem: () => null, setItem() {} } });
 vm.runInContext(source.slice(source.indexOf('const INPUT_FORMAT_KEY'), b), ctx);
 const n = v => ctx.normalizeTimeText(v);
@@ -41,5 +41,19 @@ test('Standardformat ist 24 h und TT.MM.JJJJ; Wahl wird nur im Browser gespeiche
 test('Keine Zeit- oder Datumsfelder verwenden mehr die Browserfelder (zeigen in Edge AM/PM und MM/DD/YYYY)', () => {
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8'), ext = fs.readFileSync(path.join(__dirname, '../app/excel-checkpoints-view.js'), 'utf8');
   const markup = source.replace(/\/\* TIME_INPUT_START \*\/[\s\S]*?\/\* TIME_INPUT_END \*\//, '');
-  for (const text of [markup, html, ext]) assert.doesNotMatch(text, /type=\\?"(time|date)\\?"/);
+  for (const text of [markup, html, ext]) assert.doesNotMatch(text, /type=\\?"(time|date|datetime-local)\\?"/);
+});
+
+test('Datum und Uhrzeit (Protokoll): Eingabe und Anzeige', () => {
+  const dt = v => ctx.normalizeDateTimeText(v);
+  assert.equal(dt('02.11.2026 07:30:15'), '2026-11-02T07:30:15');
+  assert.equal(dt('2.11.2026 7:30'), '2026-11-02T07:30:00');
+  assert.equal(dt('2026-11-02T07:30:00'), '2026-11-02T07:30:00');
+  assert.equal(dt('2026-11-02 19:30'), '2026-11-02T19:30:00');
+  assert.equal(dt('02.11.2026 07:30:15 pm'), '2026-11-02T19:30:15');
+  assert.equal(dt(''), '');
+  for (const v of ['abc', '02.11.2026', '31.2.2026 07:30', '02.11.2026 25:00', '02.11.2026 07:30:75']) assert.equal(dt(v), null, v);
+  assert.equal(ctx.formatDateTimeValue('2026-11-02T19:30:15', { time: '24', date: 'de' }), '02.11.2026 19:30:15');
+  assert.equal(ctx.formatDateTimeValue('2026-11-02T19:30:15', { time: '12', date: 'iso' }), '2026-11-02 07:30:15 PM');
+  assert.equal(dt(ctx.formatDateTimeValue('2026-11-02T19:30:15', { time: '12', date: 'de' })), '2026-11-02T19:30:15');
 });

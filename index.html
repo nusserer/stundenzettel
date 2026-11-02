@@ -38,6 +38,7 @@
       <h2>Stempeln</h2>
       <div id="heuteUnchecked" class="unchecked-hint" role="status" hidden></div>
       <div id="heuteRest" class="rest-hint" role="status" hidden></div>
+      <div id="heuteCheck" class="check-hint" hidden><button type="button" class="linklike" id="btnHeuteCheck"></button></div>
       <div id="heuteStempelForm"></div>
       <div class="btnrow">
         <button class="go" id="btnKommen">Kommt (jetzt)</button>
@@ -57,7 +58,7 @@
 
   <!-- MONAT -->
   <div class="view" id="view-monat">
-    <div class="view-head"><h1>Monatsansicht</h1><div class="view-actions" id="monatActions"><div class="zoom-ctl" data-zoom-target="view-monat"><button class="secondary" data-zoom="-">−</button><span class="zoom-val">100%</span><button class="secondary" data-zoom="+">+</button><button class="secondary" data-zoom="fit">Auf Seite anpassen</button></div></div></div>
+    <div class="view-head"><h1>Monatsansicht</h1><div class="view-actions" id="monatActions"><button type="button" class="secondary check-btn" id="btnMonatCheck" hidden></button><div class="zoom-ctl" data-zoom-target="view-monat"><button class="secondary" data-zoom="-">−</button><span class="zoom-val">100%</span><button class="secondary" data-zoom="+">+</button><button class="secondary" data-zoom="fit">Auf Seite anpassen</button></div></div></div>
     <div id="monatTabs" class="sheet-tabs"></div>
     <div class="monat-layout">
       <div class="monat-col-main">
@@ -348,10 +349,16 @@
 <div id="toast"></div>
 
 <input type="file" id="startFileInput" accept=".json,application/json" hidden>
+<dialog id="checkDlg" class="task-dialog check-dlg" aria-labelledby="checkTitle">
+  <h2 id="checkTitle">Prüfliste</h2>
+  <p class="hint">Hinweise auf Stempelzeiten und Aufträge, die vermutlich nicht stimmen. Nichts wird ohne deinen Klick geändert.</p>
+  <div id="checkBody"></div>
+  <div class="btnrow"><button id="checkClose" class="secondary">Schließen</button></div>
+</dialog>
 <dialog id="startDlg" class="task-dialog start-dlg"><div id="startBody"></div></dialog>
 
 <div id="modalOverlay">
   <div class="modal-box" id="modalBox"></div>
 </div>
 
-<script src="app/time-core.js"></script><script src="app/day-pause.js"></script><script src="app/task-evaluation.js"></script><script src="app/edit-history.js"></script><script src="extensions/excel-parity/excel-parity.js"></script><script src="app/excel-checkpoints-view.js"></script><script src="app/app.js"></script><script>if("serviceWorker" in navigator && location.protocol!=="file:") navigator.serviceWorker.getRegistration("sw.js").then(reg=>{if(!reg) return navigator.serviceWorker.register("sw.js");}).catch(()=>{});</script></body></html>
+<script src="app/time-core.js"></script><script src="app/day-pause.js"></script><script src="app/task-evaluation.js"></script><script src="app/data-check.js"></script><script src="app/edit-history.js"></script><script src="extensions/excel-parity/excel-parity.js"></script><script src="app/excel-checkpoints-view.js"></script><script src="app/app.js"></script><script>if("serviceWorker" in navigator && location.protocol!=="file:") navigator.serviceWorker.getRegistration("sw.js").then(reg=>{if(!reg) return navigator.serviceWorker.register("sw.js");}).catch(()=>{});</script></body></html>

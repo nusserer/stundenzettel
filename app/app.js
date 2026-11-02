@@ -1405,11 +1405,11 @@ function renderStempelList(k, day){
       }
       trimTrailingEmptyStamps(day);
       recordDayEdit(k,"Zeit",before);
-      markDirty(); renderHeute(); renderMiniPlayer();
+      markDirty(); autoTrimForDay(k); renderHeute(); renderMiniPlayer();
     });
   });
   list.querySelectorAll(".stamp-confirm").forEach(el=>{
-    el.addEventListener("click",()=>{ if(confirmAutoStamp(k,Number(el.dataset.idx))){ renderHeute(); renderMiniPlayer(); } });
+    el.addEventListener("click",()=>{ if(confirmAutoStamp(k,Number(el.dataset.idx))){ autoTrimForDay(k); renderHeute(); renderMiniPlayer(); } });
   });
   list.querySelectorAll(".stamp-del").forEach(el=>{
     el.addEventListener("click",()=>{
@@ -1540,6 +1540,7 @@ function renderUncheckedHint(){
   const n=uncheckedStampCount(), text=n?`${n} automatisch eingetragene Zeit${n===1?"":"en"} noch ungeprüft`:"";
   ["heuteUnchecked","monatUnchecked"].forEach(id=>{ const el=document.getElementById(id); if(el){ el.hidden=!n; el.textContent=text; } });
   document.getElementById("dotUnchecked")?.classList.toggle("show",n>0);
+  renderCheckBadge();
 }
 function reindexAutoAfterSplice(day, removedIdx){
   if(day.autoIdx) day.autoIdx = day.autoIdx.filter(i=>i!==removedIdx).map(i=>i>removedIdx?i-1:i);
@@ -2117,7 +2118,7 @@ function signedHours(h){ const t=hoursToHM(h); return h>0 && !String(t).startsWi
 function weekTooltip(w){
   const lines=["KW "+w.kw+" (Mo "+fmtDateDE(w.from)+" – So "+fmtDateDE(w.to)+")","IST "+hoursToHM(w.ist)+" h · SOLL "+hoursToHM(w.soll)+" h · +/- "+signedHours(w.diff)+" h"];
   if(w.ist>WEEK_WARN_HOURS) lines.push("Über "+WEEK_WARN_HOURS+" h in dieser Woche – gesetzliche Grenze beachten (Durchschnitt 8 h je Werktag).");
-  if(w.partialYear) lines.push("Die Woche reicht über den Jahreswechsel; gezählt werden nur Tage dieses Jahres.");
+  if(w.partialYear) lines.push("Die Woche reicht über den Jahreswechsel; das andere Jahr ist (noch) nicht vorhanden, gezählt werden nur vorhandene Tage.");
   lines.push("Klicken: zwischen +/- und IST umschalten");
   return lines.join("\n");
 }
@@ -2234,11 +2235,11 @@ function renderMonat(){
       }
       trimTrailingEmptyStamps(d);
       recordDayEdit(dk,"Zeit",before);
-      markDirty(); renderMonat(); renderMiniPlayer();
+      markDirty(); autoTrimForDay(dk); renderMonat(); renderMiniPlayer();
     });
   });
   tbody.querySelectorAll(".stamp-confirm").forEach(el=>{
-    el.addEventListener("click",()=>{ if(confirmAutoStamp(el.dataset.day,Number(el.dataset.idx))){ renderMonat(); renderMiniPlayer(); } });
+    el.addEventListener("click",()=>{ if(confirmAutoStamp(el.dataset.day,Number(el.dataset.idx))){ autoTrimForDay(el.dataset.day); renderMonat(); renderMiniPlayer(); } });
   });
   tbody.querySelectorAll(".time-del").forEach(el=>{
     el.addEventListener("click",(e)=>{
@@ -2663,21 +2664,34 @@ function isoWeekYear(d){ const t=new Date(Date.UTC(d.getFullYear(), d.getMonth()
 function weekIdOf(d){ return isoWeekYear(d)+"-"+String(isoWeekNumber(d)).padStart(2,"0"); }
 function weekMode(){ try{ return localStorage.getItem(WEEK_MODE_KEY)==="ist" ? "ist" : "diff"; }catch(e){ return "diff"; } }
 function toggleWeekMode(){ try{ localStorage.setItem(WEEK_MODE_KEY, weekMode()==="ist" ? "diff" : "ist"); }catch(e){} }
+/* Tag eines anderen Jahres (Jahreswechsel-Woche) aus dem Archiv berechnen; null, wenn dieses Jahr nicht vorhanden ist. */
+function calcDayAnyYear(k, cache){
+  const y=Number(k.slice(0,4));
+  if(y===state.settings.year) return calcDay(k);
+  if(!(y in cache)) cache[y]=buildArchiveViewState(y);
+  const snap=cache[y]; if(!snap) return null;
+  const real=state; state=snap;
+  try{ return calcDay(k); } finally { state=real; }
+}
 function buildWeekSummaries(){
-  const year=state.settings.year, map=new Map();
-  for(let d=new Date(year,0,1); d.getFullYear()===year; d.setDate(d.getDate()+1)){
+  const year=state.settings.year, map=new Map(), cache={};
+  const first=new Date(year,0,1); first.setDate(first.getDate()-((first.getDay()+6)%7));
+  const last=new Date(year,11,31); last.setDate(last.getDate()+(7-((last.getDay()+6)%7)-1));
+  for(let d=new Date(first); d<=last; d.setDate(d.getDate()+1)){
     const k=dateKey(d), id=weekIdOf(d);
     let w=map.get(id);
     if(!w){
       const mon=new Date(d); mon.setDate(mon.getDate()-((mon.getDay()+6)%7)); const sun=new Date(mon); sun.setDate(sun.getDate()+6);
-      w={id, kw:isoWeekNumber(d), from:dateKey(mon), to:dateKey(sun), ist:0, soll:0, diff:0, hasData:false, daysInYear:0, partialYear:false};
+      w={id, kw:isoWeekNumber(d), from:dateKey(mon), to:dateKey(sun), ist:0, soll:0, diff:0, hasData:false, daysInYear:0, missingDays:0, partialYear:false};
       map.set(id,w);
     }
-    const c=calcDay(k); w.daysInYear++;
+    const c=calcDayAnyYear(k, cache);
+    if(!c){ w.missingDays++; continue; }
+    if(d.getFullYear()===year) w.daysInYear++;
     w.ist+=c.ist||0; w.soll+=c.soll||0; w.diff+=c.diff||0;
-    if(c.ist!=null || state.days[k]?.code) w.hasData=true;
+    if(c.ist!=null || c.day.code) w.hasData=true;
   }
-  for(const w of map.values()){ w.ist=round2(w.ist); w.soll=round2(w.soll); w.diff=round2(w.diff); w.partialYear=w.daysInYear<7; }
+  for(const w of map.values()){ w.ist=round2(w.ist); w.soll=round2(w.soll); w.diff=round2(w.diff); w.partialYear=w.missingDays>0; }
   return map;
 }
 /* Höchstes Plus und höchstes Minus unter den Wochen mit Daten (nur wenn es tatsächlich ein Plus bzw. Minus gibt). */
@@ -2687,13 +2701,16 @@ function weekExtremes(weeks){
   return {best, worst};
 }
 /* Ruhezeit zwischen dem letzten „Geht“ des vorigen Arbeitstags und dem ersten „Kommt“ von Tag k. */
+function stampsOnAnyYear(k){
+  const y=Number(k.slice(0,4));
+  return (y===state.settings.year ? state.days[k]?.stamps : state.archive?.[y]?.days?.[k]?.stamps) || [];
+}
 function restInfoFor(k){
-  const st=(state.days[k]?.stamps||[]).filter(Boolean); if(!st.length) return null;
+  const st=stampsOnAnyYear(k).filter(Boolean); if(!st.length) return null;
   const start=timeToMin(st[0]), d=keyToDate(k);
   for(let i=1;i<=7;i++){
     const pd=new Date(d); pd.setDate(pd.getDate()-i);
-    if(pd.getFullYear()!==state.settings.year) return null;
-    const pk=dateKey(pd), ps=(state.days[pk]?.stamps||[]).filter(Boolean);
+    const pk=dateKey(pd), ps=stampsOnAnyYear(pk).filter(Boolean);
     if(!ps.length) continue;
     if(ps.length%2===1) return null;                       // Vortag noch offen: nicht beurteilbar
     const prevEnd=timeToMin(ps[ps.length-1]), gap=i*1440+start-prevEnd;
@@ -2707,8 +2724,7 @@ function earliestKommtToday(){
   const k=todayKey(), d=keyToDate(k);
   for(let i=1;i<=7;i++){
     const pd=new Date(d); pd.setDate(pd.getDate()-i);
-    if(pd.getFullYear()!==state.settings.year) return null;
-    const ps=(state.days[dateKey(pd)]?.stamps||[]).filter(Boolean);
+    const ps=stampsOnAnyYear(dateKey(pd)).filter(Boolean);
     if(!ps.length) continue;
     if(ps.length%2===1) return null;
     const e=timeToMin(ps[ps.length-1])+REST_MIN_MINUTES-i*1440;
@@ -3056,11 +3072,11 @@ function renderAuftraege(){
     const tr=document.createElement("tr");
     const durMin = Math.round((new Date(l.stop)-new Date(l.start))/60000);
     if(l.kind==="pause"){
-      tr.innerHTML = `<td>Pause</td><td>–</td><td>${escapeHtml(l.aenderung||"")}</td><td><input type="datetime-local" step="1" data-pause-date="${l.date}" data-pause-index="${l.pauseIndex}" data-pause-field="start" value="${localDateTimeInputFromIso(l.start)}"></td><td><input type="datetime-local" step="1" data-pause-date="${l.date}" data-pause-index="${l.pauseIndex}" data-pause-field="end" value="${localDateTimeInputFromIso(l.stop)}"></td><td class="num">${fmtDurMin(durMin)}</td>`;
+      tr.innerHTML = `<td>Pause</td><td>–</td><td>${escapeHtml(l.aenderung||"")}</td><td><input type="text" inputmode="numeric" autocomplete="off" data-datetime data-pause-date="${l.date}" data-pause-index="${l.pauseIndex}" data-pause-field="start" value="${localDateTimeInputFromIso(l.start)}"></td><td><input type="text" inputmode="numeric" autocomplete="off" data-datetime data-pause-date="${l.date}" data-pause-index="${l.pauseIndex}" data-pause-field="end" value="${localDateTimeInputFromIso(l.stop)}"></td><td class="num">${fmtDurMin(durMin)}</td>`;
     } else {
       const index=Number(l.id.slice(4));
       tr.innerHTML = `<td>${l.art==="stoerung"?"Störung":"Auftrag"}</td><td>${escapeHtml(l.orderNr||"")}</td><td><input data-log-index="${index}" data-log-field="aenderung" value="${escapeHtml(l.aenderung||"")}"></td>
-        <td><input type="datetime-local" step="1" data-log-index="${index}" data-log-field="start" value="${localDateTimeInputFromIso(l.start)}"></td><td><input type="datetime-local" step="1" data-log-index="${index}" data-log-field="stop" value="${localDateTimeInputFromIso(l.stop)}"></td><td class="num">${fmtDurMin(evaluatedDuration(l))}<small class="log-raw-duration">Protokoll: ${fmtDurMin(durMin)}</small>${taskEvaluationNotes(evaluatedLogs.get(l.id))}</td>`;
+        <td><input type="text" inputmode="numeric" autocomplete="off" data-datetime data-log-index="${index}" data-log-field="start" value="${localDateTimeInputFromIso(l.start)}"></td><td><input type="text" inputmode="numeric" autocomplete="off" data-datetime data-log-index="${index}" data-log-field="stop" value="${localDateTimeInputFromIso(l.stop)}"></td><td class="num">${fmtDurMin(evaluatedDuration(l))}<small class="log-raw-duration">Protokoll: ${fmtDurMin(durMin)}</small>${taskEvaluationNotes(evaluatedLogs.get(l.id))}</td>`;
     }
     ltbody.appendChild(tr);
   });
@@ -3149,7 +3165,11 @@ document.getElementById("btnTaskAdd").addEventListener("click",()=>addTaskFromFo
 document.getElementById("btnTaskAddStart").addEventListener("click",()=>addTaskFromForm(true));
 function logCloseActive(t, at){
   if(t.activeSince){
-    state.log.push({taskId:t.id, art:t.kind||"auftrag", orderNr:t.orderNr, modul:t.modul, station:t.station, aenderung:t.aenderung, start:t.activeSince, stop:at||new Date().toISOString()});
+    const rec={taskId:t.id, art:t.kind||"auftrag", orderNr:t.orderNr, modul:t.modul, station:t.station, aenderung:t.aenderung, start:t.activeSince, stop:at||new Date().toISOString()};
+    if(t.autoStart) rec.autoStart=true;
+    if(t.autoExtend) rec.autoExtend=t.autoExtend;
+    delete t.autoStart; delete t.autoExtend;
+    state.log.push(rec);
     t.activeSince=null;
   }
 }
@@ -3236,12 +3256,13 @@ function resumeLatestTaskOnOpen(){
   if(window.StundenzettelTimeCore?.dueScheduledBreaks({date:todayKey(),nowMinutes:now.getHours()*60+now.getMinutes(),breaks}).length) return false;
   const active = state.tasks.find(t=>t.status==="in Arbeit");
   if(active){
-    setTimeout(()=>alert("Es läuft bereits ein Auftrag. Bitte Zeiten prüfen"), 0);
+    setTimeout(()=>{ if(computeChecks().some(i=>i.type==="order-running")) openCheckList(); else alert("Es läuft bereits ein Auftrag. Bitte Zeiten prüfen"); }, 0);
     return false;
   }
   const latest = recentTasksList(20).find(x=>x.kind!=="stoerung");
   if(!latest) return false;
   taskStart(latest.id);
+  if(latest.status==="in Arbeit" && latest.activeSince) latest.autoStart=true;   // beim Kommt nachziehbar (Stempeluhr)
   markDirty();
   toast("Auftragsstempelung gestartet: "+(latest.orderNr||"(ohne Nr.)"));
   return true;
@@ -3251,6 +3272,182 @@ function taskFinish(id){
   const t = state.tasks.find(x=>x.id===id);
   logCloseActive(t);
   t.status="fertig";
+}
+
+/* ---------------- Prüfliste ---------------- */
+let checkCache=null, checkShowOlder=false;
+const CHECK_RECENT_DAYS=45, CHECK_GROUP_LIMIT=40;
+/* Vollständige Prüfung (rund 0,2 s bei einem Jahr Daten): zwischengespeichert, solange sich nichts geändert hat. */
+function computeAllChecks(fresh){
+  if(!state || !window.StundenzettelDataCheck) return [];
+  if(!fresh && checkCache && checkCache.state===state && checkCache.rev===taskEvaluationRevision && Date.now()-checkCache.at<60000) return checkCache.list;
+  const list=StundenzettelDataCheck.findIssues({days:state.days, tasks:state.tasks, log:state.log, today:todayKey(), now:new Date(),
+    isHoliday:k=>!!isHolidayOn(k), ignored:state.ui.checkIgnored||[], evaluation:getTaskEvaluation()});
+  checkCache={state, rev:taskEvaluationRevision, at:Date.now(), list};
+  return list;
+}
+/* Für die Anzeige: standardmäßig die letzten 45 Tage (laufende Aufträge immer); ältere Hinweise auf Wunsch. */
+function computeChecks(){
+  const all=computeAllChecks(false);
+  if(checkShowOlder) return all;
+  const cutoff=dateKey(new Date(Date.now()-CHECK_RECENT_DAYS*86400000));
+  return all.filter(i=>i.key>=cutoff || i.type==="order-running");
+}
+function renderCheckBadge(){
+  if(typeof document==="undefined" || !state) return;
+  const n=computeChecks().length, text=n?`Prüfliste: ${n} Hinweis${n===1?"":"e"}`:"";
+  const m=document.getElementById("btnMonatCheck"); if(m){ m.hidden=!n; m.textContent=text; }
+  const hl=document.getElementById("heuteCheck"); if(hl){ hl.hidden=!n; const b=document.getElementById("btnHeuteCheck"); if(b) b.textContent=text+" ansehen"; }
+}
+const CHECK_GROUPS=[["Aufträge",["order-running","log-outside","start-gap","overlap","estimate"]],["Stempelzeiten",["open-day","long-pair","missing-day"]]];
+function checkFixLabel(fix){ return fix.kind==="stopTask" ? "Ende setzen" : fix.kind==="trimLog" ? "Kürzen" : (fix.kind==="extendLog"||fix.kind==="extendTask") ? "Beginn vorziehen" : "Eintragen"; }
+function renderCheckList(){
+  const body=document.getElementById("checkBody"); if(!body) return;
+  const issues=computeChecks(), olderCount=computeAllChecks(false).length-computeChecks().length;
+  const autos=[
+    ...state.log.map((rec,index)=>({rec,index,id:index})).filter(x=>x.rec.autoTrim||x.rec.autoExtend),
+    ...state.tasks.filter(t=>t.autoExtend && t.status==="in Arbeit").map(t=>({rec:{taskId:t.id,art:t.kind,orderNr:t.orderNr,start:t.activeSince,stop:null,autoExtend:t.autoExtend},id:"task:"+t.id}))
+  ];
+  const autoText=({rec})=>rec.autoExtend ? "Beginn von "+localTimeFromIso(rec.autoExtend.from).slice(0,5)+" auf "+localTimeFromIso(rec.start).slice(0,5)+" vorgezogen (Kommt)" : (rec.autoTrim.from?"Ende von "+localTimeFromIso(rec.autoTrim.from).slice(0,5)+" auf "+localTimeFromIso(rec.stop).slice(0,5)+" gekürzt":"Lief weiter, Ende gesetzt auf "+localTimeFromIso(rec.stop).slice(0,5));
+  const autoHtml=autos.length ? `<h3>Automatisch angepasst (${autos.length})</h3><ul class="check-list">${autos.map(x=>`<li data-auto="${x.id}">
+      <div class="check-text"><strong>${escapeHtml((x.rec.art==="stoerung"?"Störung":"Auftrag")+" „"+(x.rec.orderNr||"(ohne Nr.)")+"“")}</strong><small>${autoText(x)} · ${fmtDateDE(dateKey(new Date(x.rec.start)))}</small></div>
+      <div class="check-actions"><button type="button" class="secondary" data-auto-undo>Rückgängig</button><button type="button" class="secondary" data-auto-ok>OK</button></div></li>`).join("")}</ul>` : "";
+  if(!issues.length && !autos.length){ body.innerHTML=`<p class="check-empty">✓ Alles in Ordnung – keine Hinweise.</p>`; renderCheckBadge(); return; }
+  const olderHtml=`<div class="check-older">${checkShowOlder?`Alle Zeiträume. <button type="button" class="linklike" id="checkOlder">Nur die letzten ${CHECK_RECENT_DAYS} Tage zeigen</button>`:(olderCount>0?`Angezeigt: letzte ${CHECK_RECENT_DAYS} Tage. <button type="button" class="linklike" id="checkOlder">${olderCount} ältere Hinweise anzeigen</button>`:"")}</div>`;
+  body.innerHTML=(issues.length?"":`<p class="check-empty">✓ Keine offenen Hinweise${checkShowOlder?"":" in den letzten "+CHECK_RECENT_DAYS+" Tagen"}.</p>`)+olderHtml+CHECK_GROUPS.map(([title,types])=>{
+    const all=issues.filter(i=>types.includes(i.type)); if(!all.length) return "";
+    const list=all.slice(0,CHECK_GROUP_LIMIT), more=all.length-list.length;
+    return `<h3>${title} (${all.length})</h3>${more>0?`<p class="hint">Es werden die ersten ${CHECK_GROUP_LIMIT} gezeigt; ${more} weitere folgen, sobald diese erledigt sind.</p>`:""}<ul class="check-list">${list.map(i=>`<li data-id="${escapeHtml(i.id)}">
+      <div class="check-text"><strong>${escapeHtml(i.text)}</strong><small>${escapeHtml(i.detail||"")}</small></div>
+      <div class="check-actions">
+        ${i.fix&&i.fix.kind==="addGeht"?`<input data-time class="check-time" aria-label="Geht-Zeit nachtragen" placeholder="hh:mm">`:""}
+        ${i.fix?`<button type="button" class="go" data-check-fix>${checkFixLabel(i.fix)}</button>`:""}
+        <button type="button" class="${i.unchecked?"go":"secondary"}" data-check-open>${i.unchecked?"Geht prüfen":"Öffnen"}</button>
+        <button type="button" class="secondary" data-check-ignore title="Hinweis ausblenden, wenn alles so stimmt">Geprüft</button>
+      </div></li>`).join("")}</ul>`;
+  }).join("")+autoHtml;
+  installFormattedInputs(body);
+  const older=document.getElementById("checkOlder"); if(older) older.onclick=()=>{ checkShowOlder=!checkShowOlder; renderCheckList(); };
+  body.querySelectorAll("li[data-auto]").forEach(li=>{
+    const raw=li.dataset.auto, index=raw.startsWith("task:")?raw:Number(raw);
+    li.querySelector("[data-auto-undo]").onclick=()=>{ if(undoAutoTrim(index)){ markDirty(); renderAll(); renderCheckList(); } };
+    li.querySelector("[data-auto-ok]").onclick=()=>{
+      if(typeof index==="string"){ const t=state.tasks.find(x=>x.id===Number(index.slice(5))); if(t) delete t.autoExtend; }
+      else if(state.log[index]){ delete state.log[index].autoTrim; delete state.log[index].autoExtend; }
+      markDirty(); renderCheckList(); };
+  });
+  body.querySelectorAll("li[data-id]").forEach(li=>{
+    const issue=issues.find(i=>i.id===li.dataset.id);
+    li.querySelector("[data-check-open]").onclick=()=>{
+      document.getElementById("checkDlg").close();
+      if(!issue.unchecked && ["order-running","log-outside","start-gap","overlap","estimate"].includes(issue.type)){ switchView("auftraege"); }
+      else { currentMonthIdx=Number(issue.key.slice(5,7))-1; switchView("monat"); }
+    };
+    li.querySelector("[data-check-ignore]").onclick=()=>{
+      state.ui.checkIgnored=[...(state.ui.checkIgnored||[]),issue.id]; markDirty(); renderCheckList();
+    };
+    const fixBtn=li.querySelector("[data-check-fix]");
+    if(fixBtn) fixBtn.onclick=()=>{ if(applyCheckFix(issue, li)){ markDirty(); renderAll(); renderCheckList(); } };
+  });
+  renderCheckBadge();
+}
+function stopRunningTask(taskId, stopIso, auto){
+  const t=state.tasks.find(x=>x.id===taskId); if(!t||t.status!=="in Arbeit") return null;
+  logCloseActive(t, stopIso);
+  const rec=state.log[state.log.length-1];
+  if(auto && rec) rec.autoTrim={from:null, at:new Date().toISOString()};
+  t.status=t.kind==="stoerung"?"warten":"Pause";
+  state.ui.taskRevision=(state.ui.taskRevision||0)+1;
+  return t;
+}
+function trimLogEntry(index, stopIso, auto){
+  const rec=state.log[index]; if(!rec || !(new Date(stopIso)>new Date(rec.start)) || !(new Date(stopIso)<new Date(rec.stop))) return null;
+  if(auto) rec.autoTrim={from:rec.stop, at:new Date().toISOString()};
+  rec.stop=stopIso; state.ui.taskRevision=(state.ui.taskRevision||0)+1;
+  return rec;
+}
+function extendLogStart(index, startIso, auto){
+  const rec=state.log[index]; if(!rec || !(new Date(startIso)<new Date(rec.start)) || !(new Date(startIso)<new Date(rec.stop))) return null;
+  if(auto) rec.autoExtend={from:rec.start, at:new Date().toISOString()};
+  rec.start=startIso; state.ui.taskRevision=(state.ui.taskRevision||0)+1;
+  return rec;
+}
+function extendRunningStart(taskId, startIso, auto){
+  const t=state.tasks.find(x=>x.id===taskId); if(!t || t.status!=="in Arbeit" || !t.activeSince || !(new Date(startIso)<new Date(t.activeSince))) return null;
+  if(auto) t.autoExtend={from:t.activeSince, at:new Date().toISOString()};
+  t.activeSince=startIso; state.ui.taskRevision=(state.ui.taskRevision||0)+1;
+  return t;
+}
+/* Wird nach jeder Änderung der Stempel eines vergangenen Tages aufgerufen (Geht nachgetragen, korrigiert oder bestätigt):
+   Aufträge, die über dieses (geprüfte) Geht hinaus weiterliefen, werden automatisch beendet bzw. gekürzt. Rückgängig in der Prüfliste. */
+function autoTrimForDay(key){
+  if(!state || !window.StundenzettelDataCheck) return 0;
+  const past=key<todayKey();   // Enden werden nie am heutigen Tag gekürzt; ein früheres Kommt darf auch heute den Beginn vorziehen
+  const fixes=computeAllChecks(true).filter(i=>i.key===key && i.fix && (past ? ["stopTask","trimLog","extendLog","extendTask"] : ["extendLog","extendTask"]).includes(i.fix.kind));
+  const done=[];
+  for(const i of fixes){
+    if(i.fix.kind==="extendLog"){ const rec=extendLogStart(i.fix.logIndex, i.fix.start, true); if(rec) done.push("„"+(rec.orderNr||"(ohne Nr.)")+"“ beginnt ab "+localTimeFromIso(i.fix.start).slice(0,5)); continue; }
+    if(i.fix.kind==="extendTask"){ const t=extendRunningStart(i.fix.taskId, i.fix.start, true); if(t) done.push("„"+(t.orderNr||"(ohne Nr.)")+"“ beginnt ab "+localTimeFromIso(i.fix.start).slice(0,5)); continue; }
+    if(i.fix.kind==="stopTask"){ const t=stopRunningTask(i.fix.taskId, i.fix.stop, true); if(t) done.push("„"+(t.orderNr||"(ohne Nr.)")+"“ beendet um "+localTimeFromIso(i.fix.stop).slice(0,5)); }
+    else { const rec=trimLogEntry(i.fix.logIndex, i.fix.stop, true); if(rec) done.push("„"+(rec.orderNr||"(ohne Nr.)")+"“ gekürzt auf "+localTimeFromIso(i.fix.stop).slice(0,5)); }
+  }
+  if(done.length){ markDirty(); toast("Automatisch angepasst: "+done.join("; ")+". Rückgängig in der Prüfliste."); }
+  return done.length;
+}
+function undoAutoTrim(index){
+  if(typeof index==="string" && index.startsWith("task:")){
+    const t=state.tasks.find(x=>x.id===Number(index.slice(5))); if(!t||!t.autoExtend) return false;
+    if(t.status==="in Arbeit") t.activeSince=t.autoExtend.from; delete t.autoExtend; return true;
+  }
+  const rec=state.log[index]; if(!rec) return false;
+  if(rec.autoExtend){ rec.start=rec.autoExtend.from; delete rec.autoExtend; state.ui.taskRevision=(state.ui.taskRevision||0)+1; return true; }
+  if(!rec.autoTrim) return false;
+  if(rec.autoTrim.from){ rec.stop=rec.autoTrim.from; delete rec.autoTrim; }
+  else {
+    const t=state.tasks.find(x=>x.id===rec.taskId);
+    if(!t || state.tasks.some(x=>x.status==="in Arbeit")){ toast("Rückgängig nicht möglich, solange ein anderer Auftrag läuft.","warn"); return false; }
+    t.activeSince=rec.start; t.status="in Arbeit"; state.log.splice(index,1);
+  }
+  state.ui.taskRevision=(state.ui.taskRevision||0)+1; return true;
+}
+function applyCheckFix(issue, li){
+  const fix=issue.fix;
+  if(fix.kind==="addGeht"){
+    const time=normalizeTimeText(li.querySelector(".check-time").value);
+    if(!time){ toast("Bitte die Geht-Zeit eingeben, z. B. 16:30.","warn"); return false; }
+    if(timeToMin(time)<=timeToMin(fix.after)){ toast("Das Geht muss nach "+fix.after+" liegen.","warn"); return false; }
+    const day=ensureDay(fix.key), before=captureDayEdit(day,["stamps","autoIdx"]);
+    day.stamps=(day.stamps||[]).filter(Boolean).concat(time);
+    recordDayEdit(fix.key,"Zeit",before);
+    toast("Geht um "+time+" am "+fmtDateDE(fix.key)+" eingetragen.");
+    autoTrimForDay(fix.key); return true;
+  }
+  if(fix.kind==="stopTask"){
+    const t=stopRunningTask(fix.taskId, fix.stop, false); if(!t) return false;
+    toast("„"+(t.orderNr||"(ohne Nr.)")+"“ pausiert, Ende "+localTimeFromIso(fix.stop).slice(0,5)+"."); return true;
+  }
+  if(fix.kind==="extendLog"){
+    if(!extendLogStart(fix.logIndex, fix.start, false)) return false;
+    toast("Beginn vorgezogen auf "+localTimeFromIso(fix.start).slice(0,5)+"."); return true;
+  }
+  if(fix.kind==="extendTask"){
+    const t=extendRunningStart(fix.taskId, fix.start, false); if(!t) return false;
+    toast("„"+(t.orderNr||"(ohne Nr.)")+"“ beginnt ab "+localTimeFromIso(fix.start).slice(0,5)+"."); return true;
+  }
+  if(fix.kind==="trimLog"){
+    if(!trimLogEntry(fix.logIndex, fix.stop, false)) return false;
+    toast("Eintrag gekürzt auf "+localTimeFromIso(fix.stop).slice(0,5)+"."); return true;
+  }
+  return false;
+}
+function openCheckList(){
+  renderCheckList();
+  const dlg=document.getElementById("checkDlg"); if(dlg && !dlg.open) dlg.showModal();
+}
+if(typeof document!=="undefined" && document.getElementById("checkClose")){
+  document.getElementById("checkClose").addEventListener("click",()=>document.getElementById("checkDlg").close());
+  document.getElementById("btnMonatCheck").addEventListener("click",openCheckList);
+  document.getElementById("btnHeuteCheck").addEventListener("click",openCheckList);
 }
 
 /* ---------------- URLAUB ---------------- */
@@ -3751,14 +3948,32 @@ function formatDateValue(iso, mode){
   return mode==="iso" ? m[0] : m[3]+"."+m[2]+"."+m[1];
 }
 function clockText(date){ return date.toLocaleTimeString(inputFormats().time==="12"?"en-US":"de-DE"); }
-const formatKindOf = el => el.hasAttribute("data-time") ? "time" : el.hasAttribute("data-date") ? "date" : null;
-const normalizeByKind = (kind, text) => kind==="time" ? normalizeTimeText(text) : normalizeDateText(text);
-const displayByKind = (kind, canonical) => kind==="time" ? formatTimeValue(canonical, inputFormats().time) : formatDateValue(canonical, inputFormats().date);
+/* Datum + Uhrzeit (Protokoll): kanonisch JJJJ-MM-TTThh:mm:ss, Anzeige „TT.MM.JJJJ hh:mm:ss“ bzw. mit AM/PM. */
+function normalizeDateTimeText(text){
+  const raw=String(text==null?"":text).trim();
+  if(raw==="") return "";
+  const m=raw.match(/^(\d{4}-\d{1,2}-\d{1,2})(?:T|\s+)(.+)$/) || raw.match(/^(\S+)\s+(.+)$/);
+  if(!m) return null;
+  const date=normalizeDateText(m[1]); if(!date) return null;
+  const tm=m[2].trim().match(/^(\d{1,2}[:.]\d{2}):(\d{2})(\s*(?:am|pm))?$/i);
+  const time=normalizeTimeText(tm ? tm[1].replace(".",":")+(tm[3]||"") : m[2]); const sec=tm ? Number(tm[2]) : 0;
+  if(!time || sec>59) return null;
+  return date+"T"+time+":"+String(sec).padStart(2,"0");
+}
+function formatDateTimeValue(canonical, f){
+  const n=normalizeDateTimeText(canonical); if(!n) return "";
+  const t=formatTimeValue(n.slice(11,16), f.time), sec=":"+n.slice(17,19);
+  return formatDateValue(n.slice(0,10), f.date)+" "+(f.time==="12" ? t.slice(0,5)+sec+t.slice(5) : t+sec);
+}
+const formatKindOf = el => el.hasAttribute("data-time") ? "time" : el.hasAttribute("data-datetime") ? "datetime" : el.hasAttribute("data-date") ? "date" : null;
+const normalizeByKind = (kind, text) => kind==="time" ? normalizeTimeText(text) : kind==="datetime" ? normalizeDateTimeText(text) : normalizeDateText(text);
+const displayByKind = (kind, canonical) => kind==="time" ? formatTimeValue(canonical, inputFormats().time) : kind==="datetime" ? formatDateTimeValue(canonical, inputFormats()) : formatDateValue(canonical, inputFormats().date);
 const nativeInputValue = typeof HTMLInputElement!=="undefined" ? Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value") : null;
 function paintFormattedInput(el){
   const kind=formatKindOf(el), f=inputFormats();
-  el.placeholder = kind==="time" ? (f.time==="12"?"hh:mm AM":"hh:mm") : (f.date==="iso"?"JJJJ-MM-TT":"TT.MM.JJJJ");
-  el.maxLength = kind==="time" ? 8 : 10;
+  const datePh=f.date==="iso"?"JJJJ-MM-TT":"TT.MM.JJJJ";
+  el.placeholder = kind==="time" ? (f.time==="12"?"hh:mm AM":"hh:mm") : kind==="datetime" ? datePh+(f.time==="12"?" hh:mm:ss AM":" hh:mm:ss") : datePh;
+  el.maxLength = kind==="time" ? 8 : kind==="datetime" ? 24 : 10;
   const current=el.value; nativeInputValue.set.call(el, current===""?"":displayByKind(kind, current));
 }
 function installFormattedInput(el){
@@ -3768,20 +3983,20 @@ function installFormattedInput(el){
   Object.defineProperty(el, "value", { configurable:true,
     get(){ const c=normalizeByKind(kind, nativeInputValue.get.call(el)); return c==null?"":c; },
     set(v){
-      const s=String(v==null?"":v), canonical=(kind==="time"?/^\d{2}:\d{2}$/:/^\d{4}-\d{2}-\d{2}$/).test(s);
+      const s=String(v==null?"":v), canonical=(kind==="time"?/^\d{2}:\d{2}$/:kind==="datetime"?/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/:/^\d{4}-\d{2}-\d{2}$/).test(s);
       nativeInputValue.set.call(el, s!=="" && canonical ? displayByKind(kind, s) : s);   // Tippen (Rohtext) bleibt unverändert, bis „change“ ihn bereinigt
     }});
   paintFormattedInput(el);
 }
 function installFormattedInputs(root){
   if(!root) return;
-  if(root.matches && root.matches("input[data-time],input[data-date]")) installFormattedInput(root);
-  if(root.querySelectorAll) root.querySelectorAll("input[data-time],input[data-date]").forEach(installFormattedInput);
+  if(root.matches && root.matches("input[data-time],input[data-date],input[data-datetime]")) installFormattedInput(root);
+  if(root.querySelectorAll) root.querySelectorAll("input[data-time],input[data-date],input[data-datetime]").forEach(installFormattedInput);
 }
-function refreshFormattedInputs(){ document.querySelectorAll("input[data-time],input[data-date]").forEach(el=>{ if(el.__formatted) paintFormattedInput(el); }); }
+function refreshFormattedInputs(){ document.querySelectorAll("input[data-time],input[data-date],input[data-datetime]").forEach(el=>{ if(el.__formatted) paintFormattedInput(el); }); }
 (function wireFormattedInputs(){
   if(typeof document==="undefined" || !document.addEventListener) return;
-  const isFormatted=el=>el && el.matches && el.matches("input[data-time],input[data-date]");
+  const isFormatted=el=>el && el.matches && el.matches("input[data-time],input[data-date],input[data-datetime]");
   installFormattedInputs(document);
   document.addEventListener("DOMContentLoaded", ()=>installFormattedInputs(document));
   if(typeof MutationObserver!=="undefined") new MutationObserver(list=>list.forEach(m=>m.addedNodes.forEach(n=>{ if(n.nodeType===1) installFormattedInputs(n); }))).observe(document.documentElement,{childList:true,subtree:true});
@@ -3792,7 +4007,7 @@ function refreshFormattedInputs(){ document.querySelectorAll("input[data-time],i
     const kind=formatKindOf(el), n=normalizeByKind(kind, nativeInputValue.get.call(el));
     if(n===null){
       el.value=el.dataset.prev||""; e.stopImmediatePropagation();
-      toast(kind==="time"?"Bitte die Uhrzeit eingeben, z. B. 07:30 oder 1445.":"Bitte das Datum eingeben, z. B. "+(inputFormats().date==="iso"?"2026-11-02.":"02.11.2026."), "warn"); return;
+      toast(kind==="time"?"Bitte die Uhrzeit eingeben, z. B. 07:30 oder 1445.":kind==="datetime"?"Bitte Datum und Uhrzeit eingeben, z. B. "+(inputFormats().date==="iso"?"2026-11-02 07:30:00.":"02.11.2026 07:30:00."):"Bitte das Datum eingeben, z. B. "+(inputFormats().date==="iso"?"2026-11-02.":"02.11.2026."), "warn"); return;
     }
     el.value=n; el.dataset.prev=n;
   }, true);

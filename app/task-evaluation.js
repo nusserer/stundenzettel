@@ -97,5 +97,5 @@
   function taskTotal(result, task) {
     return Math.max(0, (result.byTask[task.id]?.minutes || 0) + (Number(task.manualDurationOffsetMinutes) || 0));
   }
-  return Object.freeze({ evaluate, taskTotal });
+  return Object.freeze({ evaluate, taskTotal, presence });
 });

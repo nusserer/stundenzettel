@@ -42,12 +42,19 @@ test('Über 48 h in einer Woche ist erkennbar', () => {
   assert.ok(summary(app, '2026-41').ist > 48);
 });
 
-test('Wochen am Jahreswechsel zählen nur Tage des Jahres', () => {
+test('Wochen am Jahreswechsel: ohne Vorjahr nur vorhandene Tage, mit Archiv-Vorjahr vollständig', () => {
   const app = calculations('2026-10-30T20:00:00');
-  const w = summary(app, '2026-53');
-  assert.equal(w.partialYear, true); assert.ok(w.daysInYear < 7);
+  assert.equal(summary(app, '2026-01').partialYear, true);
   assert.equal(app.run("weekIdOf(new Date(2026,0,1))"), '2026-01');
   assert.equal(app.run("weekIdOf(new Date(2027,0,1))"), '2026-53');
+  app.run("state.days['2026-01-01']={stamps:['08:00','12:00'],pause:0}; state.days['2026-01-02']={stamps:['08:00','12:00'],pause:0}");
+  const ohne = summary(app, '2026-01');
+  app.run("state.archive={2025:{settings:{year:2025},days:{'2025-12-29':{stamps:['08:00','17:00'],pause:0},'2025-12-30':{stamps:['08:00','17:00'],pause:0},'2025-12-31':{stamps:['08:00','12:00'],pause:0}}}}");
+  const mit = summary(app, '2026-01');
+  assert.equal(mit.partialYear, false);
+  assert.ok(mit.ist > ohne.ist + 15);
+  assert.equal(mit.ist, 9 + 9 + 4 + 4 + 4);   // 29.–31.12. aus dem Archiv, 1.–2.1. aus dem aktuellen Jahr
+  assert.equal(app.run("state.settings.year"), 2026);   // Jahr wird nach der Berechnung wieder zurückgesetzt
 });
 
 test('Ruhezeit: unter 11 h wird gewarnt, ab 11 h nicht', () => {
@@ -74,4 +81,11 @@ test('Frühestes Kommt heute nach später Geht-Zeit', () => {
   assert.equal(app.run("minToTime(earliestKommtToday().minutes)"), '08:30');
   app.run("state.days['2026-10-26']={stamps:['08:00','16:00'],pause:0}");
   assert.equal(app.run("earliestKommtToday().minutes"), 180);   // 03:00 liegt vor „jetzt“ (05:00): kein Hinweis nötig
+});
+
+test('Ruhezeit über den Jahreswechsel nutzt das Archiv', () => {
+  const app = calculations('2026-10-30T20:00:00');
+  app.run("state.archive={2025:{settings:{year:2025},days:{'2025-12-31':{stamps:['10:00','22:00'],pause:0}}}}; state.days['2026-01-01']={stamps:['06:00','10:00'],pause:0}");
+  assert.equal(app.run("restInfoFor('2026-01-01').gap"), 480);
+  assert.equal(app.run("restInfoFor('2026-01-01').warn"), true);
 });
