@@ -201,7 +201,11 @@
     #main{padding-left:14px;padding-right:14px;}
     table.compact-kv td.val,table.compact-kv td.lbl{white-space:normal;}
     .set-ctl.calc-inline{flex-wrap:wrap;}
-    .set-label,.set-ctl{min-width:0;}
+    .set-label,.set-ctl,.set-row>*{min-width:0;}
+    .set-ctl.unit{flex-wrap:wrap;}
+    .codebox{flex-wrap:wrap;}
+    .holiday-list-wrap{max-width:100%; overflow-x:auto; position:relative;}
+    .holiday-list td,.holiday-list th{padding-left:4px; padding-right:4px;}
   }
   #view-monat .monat-layout{display:grid;grid-template-columns:minmax(min-content,2.1fr) minmax(330px,1fr);gap:14px;align-items:start;}
   #view-monat .monat-col-side{display:block;max-width:none;width:100%;min-width:0;}
@@ -231,11 +235,11 @@
   /* Kompakte Kommt/Geht-Liste in der Monatstabelle */
   .times-wrap{display:flex; flex-direction:column; gap:2px; min-width:180px;}
   .times-wrap .time-row{display:flex; align-items:center; gap:4px; flex-wrap:nowrap;}
-  .times-wrap .time-row input[type="time"]{width:86px; padding:2px 3px; flex:0 0 auto;}
+  .times-wrap .time-row input[data-time]{width:86px; padding:2px 3px; flex:0 0 auto;}
   .times-wrap .time-toggle{font-size:10px; color:var(--amber); cursor:pointer; user-select:none; white-space:nowrap;}
   .times-wrap .time-toggle:hover{text-decoration:underline;}
   .times-wrap .time-line{display:flex; align-items:center; gap:2px;}
-  .times-wrap .time-line input[type="time"]{width:96px; min-width:96px; padding:2px 3px;}
+  .times-wrap .time-line input[data-time]{width:96px; min-width:96px; padding:2px 3px;}
   .times-wrap .time-del{padding:0 5px; font-size:10px; line-height:1.6; border:1px solid var(--line); background:#fff; color:var(--ink-soft);}
   .times-wrap .time-del:hover{color:var(--rust); border-color:var(--rust);}
   .times-wrap .time-add{font-size:10px; padding:2px 6px; background:#fff; color:var(--ink-soft); border:1px dashed var(--line); white-space:nowrap; flex:0 0 auto;}
@@ -314,7 +318,7 @@
     border-radius:var(--radius); padding:6px 8px;
   }
   .stamp-row .stamp-label{font-size:11px; color:var(--ink-soft); white-space:nowrap;}
-  .stamp-row input[type="time"]{width:auto; padding:3px 5px;}
+  .stamp-row input[data-time]{width:auto; padding:3px 5px;}
   input.auto-pending{border:2px solid var(--rust) !important; background:#fdf3f2;}
   input.planned-geht{border:2px solid #2f6fd0 !important; background:#eaf2ff; color:#1d4f9c;}
   .stamp-confirm{margin-left:6px; padding:1px 7px; font-size:11px; line-height:16px; background:transparent; color:var(--rust); border:1px solid var(--rust); white-space:nowrap;}
@@ -518,11 +522,25 @@
   .rules-table th{position:static; background:var(--paper-alt); padding:8px 10px; text-align:left; font-size:12px;}
   .rules-table td{padding:8px 10px; border-bottom:1px solid var(--line); font-size:13.5px;}
   .rules-table td input{width:100%; max-width:130px;}
+  .pause-cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr)); gap:14px; margin:6px 0 10px;}
+  .pause-card{border:1px solid var(--line); border-radius:var(--radius); padding:10px 12px; background:var(--paper); min-width:0;}
+  .pause-card h3{margin:0 0 8px; font-size:13px;}
+  .pause-card>button{width:auto !important; margin-top:2px;}
+  .pause-sum{margin-top:8px; font-size:12.5px; color:var(--ink-soft);}
+  .pause-flat{margin-top:8px; font-size:12.5px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;}
+  .pause-flat input{width:72px;}
+  .pause-note{margin-top:8px; padding:5px 8px; font-size:12px; color:#7b4b0b; background:#fff6df; border:1px solid var(--amber-soft); border-radius:var(--radius);}
+  .pause-legal{margin-top:4px;}
+  .table-scroll{max-width:100%; overflow-x:auto;}
+  .set-ctl{min-width:0;}
+  .pause-card .break-row{flex-wrap:wrap; gap:6px;}
+  .pause-card .break-row input[data-time]{width:94px; padding:3px 5px;}
+  .pause-card .break-row input:not([data-time]){flex:1 1 90px; min-width:70px;}
   .breaks-group{padding:10px 0; border-bottom:1px solid var(--line);}
   .breaks-group:last-child{border-bottom:none;}
   .breaks-group h4{margin:0 0 8px; font-size:12.5px; color:var(--ink-soft);}
   .break-row{display:flex; gap:8px; align-items:center; margin-bottom:6px;}
-  .break-row input[type="time"]{width:110px;} .break-row input:not([type="time"]){flex:1; min-width:0;}
+  .break-row input[data-time]{width:110px;} .break-row input:not([data-time]){flex:1; min-width:0;}
   .break-row button{width:auto !important; padding:4px 9px;}
   .breaks-group > button{width:auto !important; margin-top:2px;}
 
@@ -603,7 +621,7 @@
     #monatTable th{font-size:11px;padding:4px 3px;}
     #monatTable tbody td{padding:1px 2px;}
     #monatTable tbody td input,#monatTable tbody td select{font-size:12px;}
-    #monatTable .times-wrap .time-row input[type="time"]{width:68px;}
+    #monatTable .times-wrap .time-row input[data-time]{width:68px;}
     #monatTable td input.wide{min-width:65px;}
     #monatTable td select{min-width:58px;max-width:85px;}
     #monatTable td:nth-child(4){white-space:normal;max-width:70px;overflow-wrap:anywhere;}
@@ -626,3 +644,17 @@
   .jahr-chart{grid-column:1;}
   .jahr-zeit{grid-column:1 / -1;}
   @media(max-width:1100px){.jahr-chart,.jahr-zeit{grid-column:1;}}
+
+/* Ziehbare Spaltenbreiten (alle Haupttabellen) */
+th .col-resizer{position:absolute; top:0; right:0; bottom:0; width:7px; cursor:col-resize; z-index:3; touch-action:none;}
+th .col-resizer:hover,table.col-resizing .col-resizer{background:rgba(47,111,208,.35);}
+table.col-resizing{user-select:none; cursor:col-resize;}
+.holiday-list th:has(>.col-resizer){position:relative;}
+table.cols-custom{table-layout:fixed; max-width:none;}
+table.cols-custom th,table.cols-custom td{overflow:hidden; text-overflow:ellipsis;}
+table.cols-custom td input,table.cols-custom td select{min-width:0 !important; max-width:100%;}
+.tablewrap:has(table.cols-custom),.holiday-list-wrap:has(table.cols-custom){overflow-x:auto !important;}
+/* Eigene Spaltenbreiten: Hauptspalte darf schmaler als die Tabelle sein, die Tabelle scrollt dann selbst */
+#view-monat .monat-layout:has(#monatTable.cols-custom){grid-template-columns:minmax(0,2.1fr) minmax(330px,1fr);}
+@media (min-width:1280px) and (max-width:1700px){#view-monat .monat-layout:has(#monatTable.cols-custom){grid-template-columns:minmax(0,1fr) 280px;}}
+@media (max-width:1279px){#view-monat .monat-layout:has(#monatTable.cols-custom){grid-template-columns:1fr;}}

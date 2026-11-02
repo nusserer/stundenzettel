@@ -13,7 +13,7 @@ let closingAfterChoice = false;
 function pad2(n){return String(n).padStart(2,"0");}
 function dateKey(d){ return d.getFullYear()+"-"+pad2(d.getMonth()+1)+"-"+pad2(d.getDate()); }
 function keyToDate(k){ const [y,m,d]=k.split("-").map(Number); return new Date(y,m-1,d); }
-function fmtDateDE(k){ const d=keyToDate(k); return pad2(d.getDate())+"."+pad2(d.getMonth()+1)+"."+d.getFullYear(); }
+function fmtDateDE(k){ if(typeof inputFormats==="function" && inputFormats().date==="iso") return k; const d=keyToDate(k); return pad2(d.getDate())+"."+pad2(d.getMonth()+1)+"."+d.getFullYear(); }
 function jsWeekdayKey(d){ const idx = (d.getDay()+6)%7; return WEEKDAY_KEYS[idx]; } // Mon=0..Sun=6
 function isoWeekNumber(dateObj){
   const d = new Date(Date.UTC(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate()));
@@ -146,7 +146,7 @@ function defaultRules(){
     kernzeit: {moDo:"14:15", fr:"14:15", sa:"14:15"},  // Geht-Empfehlung „zur Kernzeit“
     breaks: {                                          // feste Pausen für Erinnerung/Auto-Pause
       moDo:[{start:"09:15", end:"09:30", label:"Brotzeit"},{start:"12:15", end:"12:45", label:"Mittag"}],
-      fr:[{start:"09:45", end:"10:15", label:"BrotzeitFr"},{start:"12:15", end:"12:45", label:"Mittag"}],
+      fr:[{start:"09:45", end:"10:15", label:"BrotzeitFr"}],
       sa:[]
     }
   };
@@ -364,6 +364,11 @@ async function idbDel(key){
   }catch(e){ return false; }
 }
 
+/* FILE_NAMES_START */
+// Eine Datei enthält mehrere Jahre, daher steht im vorgeschlagenen Dateinamen kein Jahr.
+function dataFileName(){ return "Stundenzettel.json"; }
+function backupFileName(stamp){ return `Stundenzettel-Sicherung-${stamp}.json`; }
+/* FILE_NAMES_END */
 const PICKER_TYPES = [{description:"Stundenzettel (JSON)", accept:{"application/json":[".json"]}}];
 async function connectAutosaveFile(){
   if(!FS_SUPPORTED){ toast("Dieser Browser unterstützt automatisches Datei-Speichern nicht (nur Chrome/Edge).", "warn"); return; }
@@ -371,7 +376,7 @@ async function connectAutosaveFile(){
   try{
     const handle = await window.showSaveFilePicker({
       id: "stundenzettel-daten", startIn: "documents",
-      suggestedName: `Stundenzettel-${state.settings.year}.json`, types: PICKER_TYPES
+      suggestedName: dataFileName(), types: PICKER_TYPES
     });
     fileHandle = handle;
     fileNeedsReconnect = false;
@@ -688,7 +693,7 @@ async function createFromWizard(){
   }
   if(!FS_SUPPORTED){ adoptState(ns,null,null); toast("Dieser Browser kann nicht automatisch in eine Datei speichern. Bitte unter „Dateien & Sicherung“ eine Kopie speichern.","warn"); return; }
   try{
-    const handle=await window.showSaveFilePicker({id:"stundenzettel-daten", startIn:"documents", suggestedName:`Stundenzettel-${year}.json`, types:PICKER_TYPES});
+    const handle=await window.showSaveFilePicker({id:"stundenzettel-daten", startIn:"documents", suggestedName:dataFileName(), types:PICKER_TYPES});
     const w=await handle.createWritable(); await w.write(JSON.stringify(ns,null,2)); await w.close();
     adoptState(ns, handle, {fileName:handle.name, lastModified:Date.now()});
     toast("Datei angelegt: "+handle.name+" – Stundenzettel speichert ab jetzt automatisch dorthin.");
@@ -715,7 +720,7 @@ function updateSaveStatusUI(){
     label.textContent = "Datei-Speicherung pausiert – bitte jetzt reaktivieren";
   } else if(fileHandle){
     dot?.classList.remove("show");
-    label.textContent = "Datei aktuell · "+(lastFileWriteAt?lastFileWriteAt.toLocaleTimeString("de-DE"):"—");
+    label.textContent = "Datei aktuell · "+(lastFileWriteAt?lastFileWriteAt.toLocaleTimeString(inputFormats().time==="12"?"en-US":"de-DE"):"—");
   } else {
     dot?.classList.add("show");
     label.textContent = "NICHT gespeichert – keine Datei verbunden";
@@ -800,33 +805,76 @@ function rawWorkedMinutes(day, liveNow){
 
 // Gesetzliche Mindestpausen: ab 6 h Netto 30 Min., ab 9 h Netto 45 Min. – werden automatisch abgezogen (eigene Pause überschreibt).
 const LONG_PAUSE_AFTER_NET_MIN = 9*60, LONG_PAUSE_MIN = 45, SHORT_PAUSE_AFTER_NET_MIN = 6*60, SHORT_PAUSE_MIN = 30;
-/* Summe der Dauern der festen Pausen einer Tagesgruppe (z. B. Mo–Do 09:15–09:30 + 12:15–12:45 = 45 Min.). */
-function fixedBreakMinutes(dateObj){
-  return (rulesOf().breaks[dayGroup(dateObj)] || []).reduce((sum,b)=>{
-    const bs=timeToMin(b.start), be=timeToMin(b.end);
-    return sum + (bs!=null && be!=null && be>bs ? be-bs : 0);
-  }, 0);
+/* Pausen: Abgezogen werden nur die eingestellten Pausenzeiten, in denen man anwesend war (anteilig bei teilweiser Überschneidung).
+   Sa/So und Feiertage haben keine Uhrzeiten, dort gilt eine Pauschale in Minuten. */
+function presenceIntervals(day, liveNow){
+  const st = day.stamps || [], out = [];
+  const add = (a,b)=>{ const A=timeToMin(a), B=timeToMin(b); if(A==null || B==null || Number.isNaN(A) || Number.isNaN(B)) return; out.push([A, B>=A ? B : B+1440]); };
+  for(let i=0; i+1<st.length; i+=2) add(st[i], st[i+1]);
+  if(liveNow && st.length%2===1) add(st[st.length-1], liveNow);
+  return out;
 }
-function calcPauseMinutes(day, dateObj, holiday, liveNow){
+/* Gültige Pausenfenster einer Liste; sich überlappende Pausen werden zusammengefasst (nichts doppelt gezählt). */
+function breakWindows(list){
+  const wins = (list||[]).map(b=>({s:timeToMin(b.start), e:timeToMin(b.end), label:b.label||"Pause"}))
+    .filter(w=>w.s!=null && w.e!=null && !Number.isNaN(w.s) && !Number.isNaN(w.e) && w.e>w.s).sort((x,y)=>x.s-y.s);
+  const merged = [];
+  for(const w of wins){
+    const last = merged[merged.length-1];
+    if(last && w.s<last.e){ last.e=Math.max(last.e,w.e); last.label+="/"+w.label; } else merged.push({...w});
+  }
+  return merged;
+}
+function breakSumMinutes(list){ return breakWindows(list).reduce((sum,w)=>sum+(w.e-w.s),0); }
+function overlapMinutes(intervals, s, e){
+  let sum = 0;
+  for(const [a,b] of intervals){
+    sum += Math.max(0, Math.min(b,e)-Math.max(a,s));
+    if(b>1440) sum += Math.max(0, Math.min(b,e+1440)-Math.max(a,s+1440)); // Anwesenheit über Mitternacht
+  }
+  return sum;
+}
+function pauseDetail(day, dateObj, holiday, liveNow){
   const raw = rawWorkedMinutes(day, liveNow);
-  if(raw<=0) return 0;
+  if(raw<=0) return {total:0, raw, source:"none", parts:[]};
   const r = rulesOf();
-  // 1) Eigene Pause (Feld „Sonst.Pause“) überschreibt immer; 0 zählt als 0, leer = Standard.
+  // 1) Eigene Pause überschreibt immer; 0 zählt als 0, leer = Automatik.
   const manual = Number(day.pause);
-  if(day.pause != null && String(day.pause).trim() !== "" && Number.isFinite(manual) && manual >= 0) return manual;
-  // 2) Standard: Feiertag = Feiertagspause; sonst Dauer der festen Pausen der Tagesgruppe;
-  //    Tagesgruppe ohne feste Pausen (z. B. Sa/So) = Pausenlänge der Tagesgruppe.
-  const groupHasBreaks = (r.breaks[dayGroup(dateObj)] || []).length > 0;
-  const standard = holiday ? (Number(r.pause.holiday) || 0) : (groupHasBreaks ? fixedBreakMinutes(dateObj) : (Number(r.pause[dayGroup(dateObj)]) || 0));
-  // 3) Bereits protokollierte (ältere, manuelle) Tagespausen verlängern die Pause, wenn sie länger sind.
-  // Automatisch protokollierte Regelpausen sind bereits im Standard enthalten.
+  if(day.pause != null && String(day.pause).trim() !== "" && Number.isFinite(manual) && manual >= 0) return {total:manual, raw, source:"manual", parts:[]};
+  // 2) Automatik: Werktage mit Pausenzeiten = überschnittene Pausenzeiten; sonst Pauschale (Sa/So, Feiertag oder leere Liste).
+  const group = dayGroup(dateObj);
+  const windows = (!holiday && group!=="sa") ? breakWindows(r.breaks[group]) : [];
+  let standard, source, parts = [];
+  if(windows.length){
+    source = "breaks";
+    const presence = presenceIntervals(day, liveNow);
+    parts = windows.map(w=>({label:w.label, min:overlapMinutes(presence, w.s, w.e)})).filter(x=>x.min>0);
+    standard = parts.reduce((sum,x)=>sum+x.min,0);
+  } else {
+    source = holiday ? "holiday" : (group==="sa" ? "weekend" : "flat");
+    standard = holiday ? (Number(r.pause.holiday)||0) : (Number(r.pause[group])||0);
+  }
+  // 3) Ältere, von Hand protokollierte Tagespausen verlängern die Pause, wenn sie länger sind (automatisch protokollierte sind schon enthalten).
   const logged = (Array.isArray(day.dayPauses) && day.dayPauses.length && window.StundenzettelDayPause) ? StundenzettelDayPause.minutes(day, liveNow, {excludeScheduled:true}) : 0;
-  let pause = Math.max(standard, logged);
-  // 4) Gesetzliche Mindestpause wie im Excel: liegt die Netto-Zeit (Anwesenheit − Pause) bei 9 h oder mehr, gelten mindestens 45 Min.,
-  //    ab 6 h mindestens 30 Min. (z. B. Freitag 30 → 45 Min., sobald 9 h überschritten werden).
-  if(raw - pause >= LONG_PAUSE_AFTER_NET_MIN) pause = Math.max(pause, LONG_PAUSE_MIN);
-  else if(raw - pause >= SHORT_PAUSE_AFTER_NET_MIN) pause = Math.max(pause, SHORT_PAUSE_MIN);
-  return Math.min(raw, pause);
+  let pause = Math.max(standard, logged), legal = 0;
+  // 4) Gesetzliche Mindestpause wie im Excel: Netto (Anwesenheit − Pause) ab 9 h mindestens 45 Min., ab 6 h mindestens 30 Min.
+  if(raw - pause >= LONG_PAUSE_AFTER_NET_MIN && pause < LONG_PAUSE_MIN) legal = LONG_PAUSE_MIN;
+  else if(raw - pause >= SHORT_PAUSE_AFTER_NET_MIN && pause < SHORT_PAUSE_MIN) legal = SHORT_PAUSE_MIN;
+  if(legal) pause = legal;
+  return {total:Math.min(raw, pause), raw, source, parts, standard, logged, legal};
+}
+function calcPauseMinutes(day, dateObj, holiday, liveNow){ return pauseDetail(day, dateObj, holiday, liveNow).total; }
+/* Kurzer Text, woher die Pause eines Tages kommt (Tooltip in der Monatstabelle). */
+function pauseExplanation(day, dateObj, holiday, liveNow){
+  const d = pauseDetail(day, dateObj, holiday, liveNow);
+  if(d.source==="none") return "Keine Arbeitszeit, keine Pause.";
+  if(d.source==="manual") return "Eigene Eingabe: "+d.total+" Min. (überschreibt die Automatik; leeren stellt sie wieder her)";
+  let text;
+  if(d.source==="breaks") text = d.parts.length ? d.parts.map(x=>x.label+" "+x.min).join(" + ")+" = "+d.standard+" Min. (nur Pausenzeiten, in denen du anwesend warst)" : "Keine Pausenzeit in deiner Anwesenheit = 0 Min.";
+  else text = ({holiday:"Pauschale Feiertag", weekend:"Pauschale Samstag/Sonntag", flat:"Pauschale"})[d.source]+": "+d.standard+" Min.";
+  if(d.logged>d.standard) text += " · erfasste Pause "+d.logged+" Min. ist länger";
+  if(d.legal) text += " · gesetzliche Mindestpause "+d.legal+" Min.";
+  return text;
 }
 
 /* Geht-Zeit, mit der heute genau `netHours` Netto-Arbeitszeit erreicht werden.
@@ -842,7 +890,7 @@ function gehtForNetHours(netHours){
   const closed = rawWorkedMinutes({stamps:closedStamps}, null);
   const net = Math.round(netHours*60), dateObj = keyToDate(tk), holiday = isHolidayOn(tk);
   let pause = 0, geht = start;
-  for(let i=0; i<5; i++){
+  for(let i=0; i<400; i++){
     const offset = Math.max(0, net + pause - closed);
     geht = addMinutesToTimeStr(start, offset);
     const next = calcPauseMinutes(Object.assign({}, day, {stamps:[...closedStamps, start, geht]}), dateObj, holiday, null);
@@ -922,7 +970,7 @@ function calcDay(k, plainNow){
   }
 
   const tenHourStatus = ist==null ? "none" : (ist>10 ? "overflow" : (ist>=9.5 ? "near" : "none"));
-  return {day, dateObj, holiday, raw, pauseMin, ist, soll: soll == null ? null : round2(soll), diff, warn, tenHourStatus};
+  return {day, dateObj, holiday, raw, liveNow, pauseMin, ist, soll: soll == null ? null : round2(soll), diff, warn, tenHourStatus};
 }
 
 function monthRange(monthIdx /*0-11*/){
@@ -1329,7 +1377,7 @@ function renderStempelList(k, day){
     const row = document.createElement("div");
     row.className = "stamp-row";
     row.innerHTML = `<span class="stamp-label">${label}</span>
-      <input type="time" lang="de-DE" class="${isAuto?"auto-pending":""}" data-idx="${i}" value="${t||""}" title="${isAuto?"Automatisch eingetragen — bitte prüfen und mit „✓ geprüft“ bestätigen":""}">
+      <input type="text" inputmode="numeric" autocomplete="off" data-time class="${isAuto?"auto-pending":""}" data-idx="${i}" value="${t||""}" title="${isAuto?"Automatisch eingetragen — bitte prüfen und mit „✓ geprüft“ bestätigen":""}">
       ${isAuto&&String(t||"").trim()?`<button type="button" class="stamp-confirm" data-idx="${i}" title="Zeit ist richtig – Markierung entfernen">✓ geprüft</button>`:""}
       <button type="button" class="stamp-del" data-idx="${i}" title="Löschen">✕</button>`;
     list.appendChild(row);
@@ -1341,7 +1389,7 @@ function renderStempelList(k, day){
   addBtn.textContent = "+ Zeit manuell hinzufügen";
   box.appendChild(addBtn);
 
-  list.querySelectorAll('input[type="time"]').forEach(el=>{
+  list.querySelectorAll('input[data-time]').forEach(el=>{
     el.addEventListener("blur",(e)=>{
       const idx=Number(e.target.dataset.idx);
       const val=e.target.value;
@@ -1798,7 +1846,7 @@ function renderMiniPlayer(){
   const d = ensureDay(k);
   const openBal = yearBalanceSeries().find(p=>p.date===k)?.bal;
   const setText = (id,val)=>{ const el=doc.getElementById(id); if(el) el.textContent=val; };
-  setText("ppClock", new Date().toLocaleTimeString("de-DE"));
+  setText("ppClock", new Date().toLocaleTimeString(inputFormats().time==="12"?"en-US":"de-DE"));
   setText("ppIst", c.ist==null?"–":hoursToHM(c.ist));
   setText("ppKommt", metrics.kommt||"–");
   const tLimit = metrics.ten;
@@ -2018,7 +2066,7 @@ function buildTimesCellHTML(k, day){
   const confirmBtn = i => autoIdx.includes(i) && String(stamps[i]||"").trim() ? `<button type="button" class="stamp-confirm" data-day="${k}" data-idx="${i}" title="Automatisch eingetragen – Zeit prüfen, dann mit ✓ bestätigen" aria-label="Zeit als geprüft bestätigen">✓</button>` : "";
   const pairs=[];
   for(let i=0;i<Math.max(2,stamps.length);i+=2){
-    pairs.push(`<span class="time-pair"><input type="time" lang="de-DE" class="time-stamp ${ac(i)}" data-day="${k}" data-idx="${i}" value="${val(i)}"${attr(i)}>${confirmBtn(i)}<span>–</span><input type="time" lang="de-DE" class="time-stamp ${ac(i+1)}" data-day="${k}" data-idx="${i+1}" value="${val(i+1)}"${attr(i+1)}>${confirmBtn(i+1)}</span>`);
+    pairs.push(`<span class="time-pair"><input type="text" inputmode="numeric" autocomplete="off" data-time class="time-stamp ${ac(i)}" data-day="${k}" data-idx="${i}" value="${val(i)}"${attr(i)}>${confirmBtn(i)}<span>–</span><input type="text" inputmode="numeric" autocomplete="off" data-time class="time-stamp ${ac(i+1)}" data-day="${k}" data-idx="${i+1}" value="${val(i+1)}"${attr(i+1)}>${confirmBtn(i+1)}</span>`);
   }
   const html = `<div class="times-wrap" data-day="${k}"><div class="time-row time-rows-stacked">${pairs.map((p,idx)=>idx===pairs.length-1?`<span class="time-line-last">${p}<button type="button" class="time-add" data-day="${k}"${open?" disabled title=\"Bitte zuerst Geht eintragen\"":""}>+ Zeit</button></span>`:p).join('')}</div></div>`;
   return html;
@@ -2070,6 +2118,7 @@ function renderMonat(){
     <th>Code</th><th>Bemerkung</th>
     <th>IST</th><th>SOLL</th><th>+/-</th><th>Saldo</th>
   </tr>`;
+  initColResize(document.getElementById("monatTable"), "");
   tbody.innerHTML="";
   const balances = new Map(monthBalanceSeries(currentMonthIdx).map(p=>[p.date,p.bal]));
   const tk = todayKey();
@@ -2096,7 +2145,7 @@ function renderMonat(){
       <td>${WEEKDAY_LABELS[wk].slice(0,2)}</td>
       <td>${c.holiday?escapeHtml(c.holiday.label):""}</td>
       <td>${timesHtml}</td>
-      <td><div class="month-pause"><input inputmode="numeric" data-day="${k}" data-f="pause" aria-label="Pause in Minuten am ${fmtDateDE(k)}; leer = automatisch" title="Berechnete Pause: ${c.pauseMin} Min. · Eigene Eingabe überschreibt; leeren stellt die Automatik wieder her." placeholder="${c.pauseMin}" value="${state.days[k]?.pause!=null && String(state.days[k].pause).trim()!=="" && Number.isFinite(Number(state.days[k].pause)) ? Number(state.days[k].pause) : ""}">${c.warn?'<span class="warnflag" title="Gesetzlich zu kurze Pause" aria-label="Gesetzlich zu kurze Pause">!</span>':""}${c.tenHourStatus==="overflow"?'<span class="warnflag" title="Nettoarbeitszeit über 10 Stunden" aria-label="Nettoarbeitszeit über 10 Stunden">⚠ 10h</span>':""}</div></td>
+      <td><div class="month-pause"><input inputmode="numeric" data-day="${k}" data-f="pause" aria-label="Pause in Minuten am ${fmtDateDE(k)}; leer = automatisch" title="${escapeHtml(pauseExplanation(c.day, c.dateObj, c.holiday, c.liveNow))}" placeholder="${c.pauseMin}" value="${state.days[k]?.pause!=null && String(state.days[k].pause).trim()!=="" && Number.isFinite(Number(state.days[k].pause)) ? Number(state.days[k].pause) : ""}">${c.warn?'<span class="warnflag" title="Gesetzlich zu kurze Pause" aria-label="Gesetzlich zu kurze Pause">!</span>':""}${c.tenHourStatus==="overflow"?'<span class="warnflag" title="Nettoarbeitszeit über 10 Stunden" aria-label="Nettoarbeitszeit über 10 Stunden">⚠ 10h</span>':""}</div></td>
       <td>${codeSelectHtml(k, state.days[k]?.code||"")}</td>
       <td><input class="wide" data-day="${k}" data-f="bemerkung" value="${String(state.days[k]?.bemerkung||"").replace(/"/g,'&quot;')}"></td>
       <td class="num">${c.ist==null?"":hoursToHM(c.ist)}</td>
@@ -2308,6 +2357,7 @@ function renderJahrKalender(){
   const thead=document.querySelector("#jahrKalender thead");
   const tbody=document.querySelector("#jahrKalender tbody");
   thead.innerHTML = `<tr><th>Tag</th>${MONTH_NAMES.map(m=>`<th>${m.slice(0,3)}</th>`).join("")}</tr>`;
+  initColResize(document.getElementById("jahrKalender"), "jahrKalender");
   tbody.innerHTML="";
   const tk = todayKey();
   for(let day=1; day<=31; day++){
@@ -2511,6 +2561,7 @@ function renderJahrBody(){
   const tbody=document.querySelector("#jahrTable tbody");
   thead.innerHTML = `<tr><th>Monat</th><th>Übertrag</th><th>IST</th><th>SOLL</th><th>+/-</th><th>Modus</th><th>Ausgezahlt</th><th>Saldo Ende</th>
     <th>Anwesenheit</th><th>U (U)/(UH)</th><th>K (K)</th><th>GLZ (GLZ)</th><th>VU (VU)</th></tr>`;
+  initColResize(document.getElementById("jahrTable"), "jahrTable");
   tbody.innerHTML="";
   let sumAnwesenheit=0, sumU=0, sumK=0, sumGLZ=0, sumVU=0, sumPaid=0;
   for(let m=0;m<12;m++){
@@ -2696,12 +2747,6 @@ function applyTableColumnWidths(table, widths){
   table.style.tableLayout="fixed";
   table.style.minWidth=widths.reduce((sum,width)=>sum+width,0)+"px";
 }
-function installColumnResizers(table, widths){
-  table.querySelectorAll("th").forEach((th,index)=>{
-    const handle=document.createElement("span"); handle.className="resize-task-column"; handle.title="Spaltenbreite ziehen";
-    handle.onmousedown=event=>{ const startX=event.clientX, start=widths[index]||th.offsetWidth; const move=e=>{widths[index]=Math.max(48,Math.round(start+e.clientX-startX)); applyTableColumnWidths(table,widths);}; const up=()=>{document.removeEventListener("mousemove",move);document.removeEventListener("mouseup",up);markDirty();}; document.addEventListener("mousemove",move);document.addEventListener("mouseup",up);}; th.appendChild(handle);
-  });
-}
 function renderRunningTask(){
   const box=document.getElementById("runningTaskPanel"); if(!box) return;
   const t=state.tasks.find(x=>x.status==="in Arbeit");
@@ -2868,7 +2913,7 @@ function renderAuftraege(){
       renderAuftraege();
     });
   });
-  installColumnResizers(document.getElementById("taskTable"), widths);
+  initColResize(document.getElementById("taskTable"), isStoer?"stoerTable":"taskTable", widths);
   const searchEl = document.getElementById("taskSearch");
   if(searchEl && searchEl.value !== taskSearchTerm) searchEl.value = taskSearchTerm;
   if(searchEl && !searchEl.dataset.wired){
@@ -2925,7 +2970,7 @@ function renderAuftraege(){
     logSortState = logSortState.col===col ? {col,dir:-logSortState.dir} : {col,dir:1};
     renderAuftraege();
   }));
-  installColumnResizers(document.getElementById("logTable"), state.ui.logTableColumnWidths);
+  initColResize(document.getElementById("logTable"), "logTable", state.ui.logTableColumnWidths);
 }
 function updateTaskMetadata(task, field, value){
   if(!task) return;
@@ -3194,22 +3239,49 @@ function applySettingsSection(){
   document.querySelectorAll("#view-einstellungen .set-section").forEach(s=>s.classList.toggle("active", s.dataset.sec===settingsSection));
 }
 const GROUP_LABEL={moDo:"Montag–Donnerstag", fr:"Freitag", sa:"Samstag/Sonntag"};
+const OLD_FRIDAY_DEFAULT = '09:45-10:15,12:15-12:45';
 function renderRulesEditor(){
   const r=rulesOf(), groups=["moDo","fr","sa"];
+  const rerender=()=>renderRulesEditor();
+  // Kernzeit je Tagesgruppe
   const tbl=document.getElementById("rulesTable");
   tbl.innerHTML=`<thead><tr><th></th>${groups.map(g=>`<th>${GROUP_LABEL[g]}</th>`).join("")}</tr></thead><tbody>
-    <tr><td>Pause ohne feste Pausen (Min.)</td>${groups.map(g=>`<td><input type="number" min="0" step="1" data-r="pause" data-g="${g}" placeholder="30" value="${r.pause[g]}"></td>`).join("")}</tr>
-    <tr><td>Kernzeit</td>${groups.map(g=>`<td><input type="time" data-r="kernzeit" data-g="${g}" value="${r.kernzeit[g]||""}"></td>`).join("")}</tr></tbody>`;
-  tbl.querySelectorAll("input").forEach(el=>el.onchange=()=>{ const g=el.dataset.g;
-    if(el.dataset.r==="pause"){ const minutes=parseMinutesInput(el.value); if(minutes==null||minutes==="") { toast("Bitte Pause in Minuten eingeben, z. B. 30.","warn"); renderRulesEditor(); return; } r.pause[g]=minutes; } else r.kernzeit[g]=el.value; markDirty(); });
-  const bind=(id,fn,val,format)=>{ const el=document.getElementById(id); el.value=val; el.onchange=()=>{ const value=format?parseMinutesInput(el.value):el.value; if(value==null||value===""){ toast("Bitte Pause in Minuten eingeben, z. B. 30.","warn"); renderRulesEditor(); return; } fn(value); markDirty(); }; };
-  bind("rPauseHoliday",v=>r.pause.holiday=v,r.pause.holiday,true);
-  bind("rLatestEnd",v=>r.latestEnd=v||"18:30",r.latestEnd);
-  const box=document.getElementById("rBreaksEditor");
-  box.innerHTML=groups.map(g=>`<div class="breaks-group"><h4>${GROUP_LABEL[g]}</h4>${(r.breaks[g]||[]).map((b,i)=>`<div class="break-row"><input type="time" data-g="${g}" data-i="${i}" data-f="start" value="${b.start}"><span>–</span><input type="time" data-g="${g}" data-i="${i}" data-f="end" value="${b.end}"><input data-g="${g}" data-i="${i}" data-f="label" value="${escapeHtml(b.label||"")}" placeholder="Bezeichnung"><button type="button" class="secondary" data-del-g="${g}" data-del-i="${i}">✕</button></div>`).join("")||'<div class="hint">Keine festen Pausen.</div>'}<button type="button" class="secondary" data-add-g="${g}">+ Pause</button></div>`).join("");
-  box.querySelectorAll("input").forEach(el=>el.onchange=()=>{ r.breaks[el.dataset.g][Number(el.dataset.i)][el.dataset.f]=el.value; markDirty(); });
-  box.querySelectorAll("[data-del-g]").forEach(b=>b.onclick=()=>{ r.breaks[b.dataset.delG].splice(Number(b.dataset.delI),1); markDirty(); renderRulesEditor(); });
-  box.querySelectorAll("[data-add-g]").forEach(b=>b.onclick=()=>{ (r.breaks[b.dataset.addG]=r.breaks[b.dataset.addG]||[]).push({start:"12:00",end:"12:30",label:"Pause"}); markDirty(); renderRulesEditor(); });
+    <tr><td>Kernzeit</td>${groups.map(g=>`<td><input type="text" inputmode="numeric" autocomplete="off" data-time data-r="kernzeit" data-g="${g}" value="${r.kernzeit[g]||""}"></td>`).join("")}</tr></tbody>`;
+  tbl.querySelectorAll("input").forEach(el=>el.onchange=()=>{ r.kernzeit[el.dataset.g]=el.value; markDirty(); });
+  const latest=document.getElementById("rLatestEnd"); latest.value=r.latestEnd; latest.onchange=()=>{ r.latestEnd=latest.value||"18:30"; markDirty(); };
+  // Pausen: eine Karte je Tagestyp
+  const minutesInput=(attrs,value)=>`<input type="number" min="0" step="1" ${attrs} value="${value}">`;
+  const workdayCard=g=>{
+    const list=r.breaks[g]||[], sum=breakSumMinutes(list);
+    const legacy=g==="fr" && list.map(b=>b.start+"-"+b.end).join(",")===OLD_FRIDAY_DEFAULT;
+    return `<div class="pause-card"><h3>${GROUP_LABEL[g]}</h3>
+      ${list.map((b,i)=>`<div class="break-row"><input type="text" inputmode="numeric" autocomplete="off" data-time data-g="${g}" data-i="${i}" data-f="start" value="${b.start}" aria-label="Pausenbeginn"><span>–</span><input type="text" inputmode="numeric" autocomplete="off" data-time data-g="${g}" data-i="${i}" data-f="end" value="${b.end}" aria-label="Pausenende"><input data-g="${g}" data-i="${i}" data-f="label" value="${escapeHtml(b.label||"")}" placeholder="Bezeichnung" aria-label="Bezeichnung"><button type="button" class="secondary" data-del-g="${g}" data-del-i="${i}" aria-label="Pause löschen">✕</button></div>`).join("")}
+      <button type="button" class="secondary" data-add-g="${g}">+ Pause</button>
+      ${list.length?`<div class="pause-sum">Summe: <strong>${sum} Min.</strong></div>`
+        :`<div class="pause-flat">Keine Pausenzeiten – pauschal ${minutesInput(`data-flat="${g}" aria-label="Pauschale in Minuten"`,r.pause[g])} Min. pro Tag</div>`}
+      ${legacy?`<div class="pause-note">Das war der frühere Standard für neue Dateien und ergibt freitags 60 Min. Prüfe, ob das für dich stimmt; sonst eine der Pausen löschen.</div>`:""}</div>`;
+  };
+  const weekendCard=`<div class="pause-card"><h3>Samstag/Sonntag &amp; Feiertag</h3>
+    <div class="pause-flat">Samstag/Sonntag: ${minutesInput('data-flat="sa" aria-label="Pauschale Samstag/Sonntag in Minuten"',r.pause.sa)} Min.</div>
+    <div class="pause-flat">Feiertag: ${minutesInput('data-flat="holiday" aria-label="Pauschale Feiertag in Minuten"',r.pause.holiday)} Min.</div>
+    <div class="pause-sum">Pauschale pro Tag, keine Uhrzeiten.</div></div>`;
+  const box=document.getElementById("pauseCards");
+  box.innerHTML=workdayCard("moDo")+workdayCard("fr")+weekendCard;
+  box.querySelectorAll("input[data-f]").forEach(el=>el.onchange=()=>{
+    const g=el.dataset.g, item=r.breaks[g][Number(el.dataset.i)], field=el.dataset.f;
+    if(field!=="label"){
+      const next=Object.assign({},item,{[field]:el.value}), s=timeToMin(next.start), e=timeToMin(next.end);
+      if(!el.value || s==null || e==null || e<=s){ toast("Das Ende der Pause muss nach dem Beginn liegen.","warn"); rerender(); return; }
+    }
+    item[field]=el.value; markDirty(); if(field!=="label") rerender();
+  });
+  box.querySelectorAll("[data-flat]").forEach(el=>el.onchange=()=>{
+    const minutes=parseMinutesInput(el.value);
+    if(minutes==null||minutes===""){ toast("Bitte Pause in Minuten eingeben, z. B. 30.","warn"); rerender(); return; }
+    r.pause[el.dataset.flat]=minutes; markDirty();
+  });
+  box.querySelectorAll("[data-del-g]").forEach(b=>b.onclick=()=>{ r.breaks[b.dataset.delG].splice(Number(b.dataset.delI),1); markDirty(); rerender(); });
+  box.querySelectorAll("[data-add-g]").forEach(b=>b.onclick=()=>{ (r.breaks[b.dataset.addG]=r.breaks[b.dataset.addG]||[]).push({start:"12:00",end:"12:30",label:"Pause"}); markDirty(); rerender(); });
 }
 function renderEinstellungen(){
   applySettingsSection();
@@ -3218,6 +3290,8 @@ function renderEinstellungen(){
   document.getElementById("sName").value = state.settings.name;
   document.getElementById("sPersNr").value = state.settings.personalNr;
   document.getElementById("sDurationFormat").value = state.ui.durationFormat;
+  document.getElementById("sTimeFormat").value = inputFormats().time;
+  document.getElementById("sDateFormat").value = inputFormats().date;
   document.getElementById("sStempeln").value = state.settings.stempelnAktiv ? "ja":"nein";
   document.getElementById("sMiniAuto").value = state.settings.miniPlayerAutoOpen ? "ja":"nein";
   document.getElementById("sPauseMiniAlert").checked = state.settings.pauseAlerts.miniPlayer;
@@ -3227,6 +3301,8 @@ function renderEinstellungen(){
 
   document.getElementById("sName").onchange=(e)=>{ state.settings.name=e.target.value; markDirty(); };
   document.getElementById("sPersNr").onchange=(e)=>{ state.settings.personalNr=e.target.value; markDirty(); };
+  document.getElementById("sTimeFormat").onchange=(e)=>{ setInputFormats({time:e.target.value}); renderAll(); };
+  document.getElementById("sDateFormat").onchange=(e)=>{ setInputFormats({date:e.target.value}); renderAll(); };
   document.getElementById("sDurationFormat").onchange=(e)=>{ state.ui.durationFormat=e.target.value; markDirty(); renderAll(); };
   document.getElementById("sStempeln").onchange=(e)=>{ state.settings.stempelnAktiv = e.target.value==="ja"; markDirty(); };
   document.getElementById("sMiniAuto").onchange=(e)=>{ state.settings.miniPlayerAutoOpen = e.target.value==="ja"; markDirty(); };
@@ -3306,6 +3382,7 @@ function renderEinstellungen(){
   document.getElementById("feiertageJahr").textContent = "("+state.settings.year+")";
   if(window.StundenzettelExcelViews){
     StundenzettelExcelViews.renderHolidayEditor({state, markDirty, renderSettings: renderEinstellungen, toast});
+    initColResize(document.querySelector("#excelHolidayEditor table.holiday-list"), "holidays");
   }
   renderSicherung();
 }
@@ -3338,7 +3415,7 @@ function renderSicherung(){
 }
 async function saveBackupCopy(){
   const stamp=new Date().toISOString().slice(0,16).replace(/[:T]/g,"-");
-  const name=`Stundenzettel-${state.settings.year}-Sicherung-${stamp}.json`;
+  const name=backupFileName(stamp);
   const text=JSON.stringify(state,null,2);
   if(FS_SUPPORTED){
     try{
@@ -3486,7 +3563,7 @@ document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==
 /* ---------------- Clock ---------------- */
 setInterval(()=>{
   const el=document.getElementById("railClock");
-  if(el) el.textContent = new Date().toLocaleTimeString("de-DE");
+  if(el) el.textContent = new Date().toLocaleTimeString(inputFormats().time==="12"?"en-US":"de-DE");
 }, 1000);
 
 // Live-Aktualisierung von "IST heute" & Co., solange man noch gestempelt ist — nur die Kennzahlen-Kacheln,
@@ -3503,6 +3580,163 @@ setInterval(()=>{
   if(table && table.contains(document.activeElement)) return;
   renderMonat();
 }, 60000);
+
+/* TIME_INPUT_START */
+/* Uhrzeit- und Datumsfelder sind Textfelder, deren Format die App bestimmt (Einstellungen → Allgemein; Standard 24 h und TT.MM.JJJJ).
+   Das Browserfeld type="time"/"date" folgt der Anzeigesprache des Betriebssystems (z. B. Edge mit englischem Windows: AM/PM, MM/DD/YYYY).
+   `value` liefert und setzt weiterhin immer hh:mm bzw. JJJJ-MM-TT; nur die Anzeige im Feld folgt der Einstellung. */
+const INPUT_FORMAT_KEY = "stundenzettel-v3-input-formats";
+let inputFormatCache = null;
+function inputFormats(){
+  if(inputFormatCache) return inputFormatCache;
+  let p={}; try{ p=JSON.parse(localStorage.getItem(INPUT_FORMAT_KEY))||{}; }catch(e){}
+  return inputFormatCache={time:p.time==="12"?"12":"24", date:p.date==="iso"?"iso":"de"};
+}
+function setInputFormats(patch){
+  inputFormatCache=Object.assign({}, inputFormats(), patch);
+  try{ localStorage.setItem(INPUT_FORMAT_KEY, JSON.stringify(inputFormatCache)); }catch(e){}
+  if(typeof refreshFormattedInputs==="function") refreshFormattedInputs();
+}
+function normalizeTimeText(text){
+  const raw=String(text==null?"":text).trim().toLowerCase();
+  if(raw==="") return "";
+  const m=raw.match(/^(\d{1,2})(\d{2})\s*(am|pm)?$/) || raw.match(/^(\d{1,2})(?:\s*[:.,h]\s*(\d{1,2}))?\s*(am|pm)?$/);
+  if(!m) return null;
+  let h=Number(m[1]), min=m[2]==null?0:Number(m[2]);
+  const mer=m[3];
+  if(mer){ if(h<1 || h>12) return null; h=h%12+(mer==="pm"?12:0); }
+  if(h>23 || min>59) return null;
+  return String(h).padStart(2,"0")+":"+String(min).padStart(2,"0");
+}
+function formatTimeValue(value, mode){
+  const n=normalizeTimeText(value); if(!n) return "";
+  if(mode!=="12") return n;
+  const h=Number(n.slice(0,2));
+  return String(h%12||12).padStart(2,"0")+n.slice(2)+(h<12?" AM":" PM");
+}
+/* Datum: akzeptiert 2.11.2026, 02.11.26, 2.11. (aktuelles Jahr), 02112026, 2026-11-02, 2/11/2026 (Tag/Monat); liefert JJJJ-MM-TT, "" oder null (ungültig). */
+function normalizeDateText(text, now){
+  const raw=String(text==null?"":text).trim();
+  if(raw==="") return "";
+  let y,mo,d,m;
+  if((m=raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))){ y=+m[1]; mo=+m[2]; d=+m[3]; }
+  else if((m=raw.match(/^(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{4}|\d{2})$/))){ d=+m[1]; mo=+m[2]; y=m[3].length===2?2000+ +m[3]:+m[3]; }
+  else if((m=raw.match(/^(\d{1,2})\.(\d{1,2})\.?$/))){ d=+m[1]; mo=+m[2]; y=(now||new Date()).getFullYear(); }
+  else if((m=raw.match(/^(\d{2})(\d{2})(\d{4})$/))){ d=+m[1]; mo=+m[2]; y=+m[3]; }
+  else return null;
+  const date=new Date(y,mo-1,d);
+  if(y<1900 || y>2999 || date.getFullYear()!==y || date.getMonth()!==mo-1 || date.getDate()!==d) return null;
+  return String(y)+"-"+String(mo).padStart(2,"0")+"-"+String(d).padStart(2,"0");
+}
+function formatDateValue(iso, mode){
+  const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso||"")); if(!m) return "";
+  return mode==="iso" ? m[0] : m[3]+"."+m[2]+"."+m[1];
+}
+function clockText(date){ return date.toLocaleTimeString(inputFormats().time==="12"?"en-US":"de-DE"); }
+const formatKindOf = el => el.hasAttribute("data-time") ? "time" : el.hasAttribute("data-date") ? "date" : null;
+const normalizeByKind = (kind, text) => kind==="time" ? normalizeTimeText(text) : normalizeDateText(text);
+const displayByKind = (kind, canonical) => kind==="time" ? formatTimeValue(canonical, inputFormats().time) : formatDateValue(canonical, inputFormats().date);
+const nativeInputValue = typeof HTMLInputElement!=="undefined" ? Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value") : null;
+function paintFormattedInput(el){
+  const kind=formatKindOf(el), f=inputFormats();
+  el.placeholder = kind==="time" ? (f.time==="12"?"hh:mm AM":"hh:mm") : (f.date==="iso"?"JJJJ-MM-TT":"TT.MM.JJJJ");
+  el.maxLength = kind==="time" ? 8 : 10;
+  const current=el.value; nativeInputValue.set.call(el, current===""?"":displayByKind(kind, current));
+}
+function installFormattedInput(el){
+  if(!nativeInputValue || el.__formatted) return;
+  const kind=formatKindOf(el); if(!kind) return;
+  el.__formatted=true;
+  Object.defineProperty(el, "value", { configurable:true,
+    get(){ const c=normalizeByKind(kind, nativeInputValue.get.call(el)); return c==null?"":c; },
+    set(v){
+      const s=String(v==null?"":v), canonical=(kind==="time"?/^\d{2}:\d{2}$/:/^\d{4}-\d{2}-\d{2}$/).test(s);
+      nativeInputValue.set.call(el, s!=="" && canonical ? displayByKind(kind, s) : s);   // Tippen (Rohtext) bleibt unverändert, bis „change“ ihn bereinigt
+    }});
+  paintFormattedInput(el);
+}
+function installFormattedInputs(root){
+  if(!root) return;
+  if(root.matches && root.matches("input[data-time],input[data-date]")) installFormattedInput(root);
+  if(root.querySelectorAll) root.querySelectorAll("input[data-time],input[data-date]").forEach(installFormattedInput);
+}
+function refreshFormattedInputs(){ document.querySelectorAll("input[data-time],input[data-date]").forEach(el=>{ if(el.__formatted) paintFormattedInput(el); }); }
+(function wireFormattedInputs(){
+  if(typeof document==="undefined" || !document.addEventListener) return;
+  const isFormatted=el=>el && el.matches && el.matches("input[data-time],input[data-date]");
+  installFormattedInputs(document);
+  document.addEventListener("DOMContentLoaded", ()=>installFormattedInputs(document));
+  if(typeof MutationObserver!=="undefined") new MutationObserver(list=>list.forEach(m=>m.addedNodes.forEach(n=>{ if(n.nodeType===1) installFormattedInputs(n); }))).observe(document.documentElement,{childList:true,subtree:true});
+  document.addEventListener("focusin", e=>{ if(isFormatted(e.target)) e.target.dataset.prev=e.target.value; });
+  // Capture: Wert vor den Änderungs-Handlern der Felder bereinigen; ungültige Eingaben werden verworfen.
+  document.addEventListener("change", e=>{
+    const el=e.target; if(!isFormatted(el)) return;
+    const kind=formatKindOf(el), n=normalizeByKind(kind, nativeInputValue.get.call(el));
+    if(n===null){
+      el.value=el.dataset.prev||""; e.stopImmediatePropagation();
+      toast(kind==="time"?"Bitte die Uhrzeit eingeben, z. B. 07:30 oder 1445.":"Bitte das Datum eingeben, z. B. "+(inputFormats().date==="iso"?"2026-11-02.":"02.11.2026."), "warn"); return;
+    }
+    el.value=n; el.dataset.prev=n;
+  }, true);
+  document.addEventListener("keydown", e=>{
+    const el=e.target; if(!isFormatted(el)) return;
+    if(e.key==="Enter"){ el.blur(); return; }   // übernimmt die Eingabe wie beim Verlassen des Feldes
+    if(!el.hasAttribute("data-time") || (e.key!=="ArrowUp" && e.key!=="ArrowDown")) return;
+    const cur=normalizeTimeText(nativeInputValue.get.call(el)); if(!cur) return;
+    e.preventDefault();
+    const step=(e.shiftKey?15:1)*(e.key==="ArrowUp"?1:-1);
+    el.value=minToTime(((timeToMin(cur)+step)%1440+1440)%1440);
+    el.dispatchEvent(new Event("change",{bubbles:true}));
+  });
+})();
+/* TIME_INPUT_END */
+
+/* COL_WIDTHS_START */
+/* Spaltenbreiten aller Haupttabellen per Ziehen am Spaltenrand (wie Excel). Nur im Browser gespeichert, nie in der Stundendatei.
+   Doppelklick auf einen Spaltenrand stellt die Standardbreiten dieser Tabelle wieder her. */
+const COL_WIDTH_KEY = "stundenzettel-v3-month-col-widths", COL_MIN = 36, COL_MAX = 600;
+function colWidthKey(name){ return name ? "stundenzettel-v3-col-widths-"+name : COL_WIDTH_KEY; }  // Monatstabelle behält ihren ersten Schlüssel
+function clampColWidth(w){ if(w===null || w==="" || typeof w==="boolean") return null; const n=Math.round(Number(w)); return Number.isFinite(n) ? Math.min(COL_MAX, Math.max(COL_MIN, n)) : null; }
+function sanitizeColWidths(list, count){
+  if(!Array.isArray(list) || list.length!==count) return null;
+  const out=list.map(clampColWidth); return out.every(v=>v!==null) ? out : null;
+}
+function loadColWidths(count, name){ try{ return sanitizeColWidths(JSON.parse(localStorage.getItem(colWidthKey(name))), count); }catch(e){ return null; } }
+function saveColWidths(list, name){ try{ if(list) localStorage.setItem(colWidthKey(name), JSON.stringify(list)); else localStorage.removeItem(colWidthKey(name)); }catch(e){} }
+function applyColWidths(table, widths){
+  const old=table.querySelector("colgroup"); if(old) old.remove();
+  if(!widths){ table.classList.remove("cols-custom"); table.style.width=""; return; }
+  const cg=document.createElement("colgroup");
+  widths.forEach(w=>{ const c=document.createElement("col"); c.style.width=w+"px"; cg.appendChild(c); });
+  table.insertBefore(cg, table.firstChild);
+  table.classList.add("cols-custom"); table.style.minWidth=""; table.style.width=widths.reduce((a,b)=>a+b,0)+"px";
+}
+/* name: Speicherschlüssel der Tabelle; defaults: bisherige Standardbreiten (z. B. aus den Einstellungen), sonst automatisch. */
+function initColResize(table, name, defaults){
+  if(!table) return;
+  const ths=[...table.querySelectorAll("thead th")];
+  const restore=()=>{ applyColWidths(table, null); table.style.width=""; if(defaults) applyTableColumnWidths(table, defaults); };
+  const saved=loadColWidths(ths.length, name);
+  if(saved) applyColWidths(table, saved); else if(defaults) applyTableColumnWidths(table, defaults); else applyColWidths(table, null);
+  ths.forEach((th,i)=>{
+    const h=document.createElement("span"); h.className="col-resizer"; h.title="Ziehen: Spaltenbreite ändern · Doppelklick: Standardbreiten";
+    th.appendChild(h);
+    h.addEventListener("click", ev=>ev.stopPropagation());   // kein Sortieren beim Ziehen
+    h.addEventListener("dblclick", ev=>{ ev.stopPropagation(); saveColWidths(null, name); restore(); });
+    h.addEventListener("pointerdown", ev=>{
+      ev.preventDefault(); ev.stopPropagation(); try{ h.setPointerCapture(ev.pointerId); }catch(e){}
+      const scale=(th.getBoundingClientRect().width/th.offsetWidth)||1;
+      const widths=loadColWidths(ths.length, name) || ths.map(x=>clampColWidth(x.getBoundingClientRect().width/scale));
+      const startX=ev.clientX, startW=widths[i];
+      table.classList.add("col-resizing");
+      const move=e=>{ widths[i]=clampColWidth(startW+(e.clientX-startX)/scale); applyColWidths(table, widths); };
+      const up=()=>{ h.removeEventListener("pointermove",move); h.removeEventListener("pointerup",up); h.removeEventListener("pointercancel",up);
+        table.classList.remove("col-resizing"); saveColWidths(widths, name); };
+      h.addEventListener("pointermove",move); h.addEventListener("pointerup",up); h.addEventListener("pointercancel",up);
+    });
+  });
+}
+/* COL_WIDTHS_END */
 
 /* ---------------- Helpers ---------------- */
 function escapeHtml(s){ return String(s==null?"":s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }

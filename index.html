@@ -68,7 +68,7 @@
             <tbody></tbody>
           </table>
         </div>
-        <p class="hint">Pause in Minuten: leer = automatisch, eigene Eingabe (auch 0) überschreibt. Automatisch gelten die festen Pausen und mindestens 30 Min. ab 6 h bzw. 45 Min. ab 9 h Arbeitszeit. „!“ = zu kurze Pause, „⚠ 10h“ = mehr als 10 h netto. Blau umrandetes Geht = ungespeicherter Vorschlag. Leere Tage zählen nicht mit.</p>
+        <p class="hint">Pause in Minuten: leer = automatisch (nur Pausenzeiten, in denen du anwesend warst; der Tooltip zeigt die Herkunft), eigene Eingabe (auch 0) überschreibt. Mindestens 30 Min. ab 6 h bzw. 45 Min. ab 9 h Arbeitszeit. „!“ = zu kurze Pause, „⚠ 10h“ = mehr als 10 h netto. Blau umrandetes Geht = ungespeicherter Vorschlag. Leere Tage zählen nicht mit.</p>
         <div class="panel">
           <h2>Monatsverlauf <small>Gleitzeitsaldo je Tag über den Monat</small></h2>
           <div class="chart-wrap"><svg id="monatChart" viewBox="0 0 1600 420" preserveAspectRatio="xMidYMid meet"></svg></div>
@@ -94,7 +94,7 @@
               <div><label for="gFreeMoDo">Freies Ziel Mo–Do (h)</label><input type="number" step="0.1" id="gFreeMoDo"></div>
               <div><label for="gFreeFr">Freies Ziel Fr (h)</label><input type="number" step="0.1" id="gFreeFr"></div>
               <div><label for="gFriAdjust">Freitag-Anpassung Woche/WZ (h)</label><input type="number" step="0.5" id="gFriAdjust" title="−2 = Freitag 2 h kürzer, Mo–Do gleichen aus; +2 = Freitag 2 h länger"><small class="hint">−2 = Freitag 2 h kürzer (Mo–Do gleichen aus)</small></div>
-              <div><label for="gWunschGeht">Wunsch-Geht-Zeit (heute)</label><input type="time" step="60" id="gWunschGeht"></div>
+              <div><label for="gWunschGeht">Wunsch-Geht-Zeit (heute)</label><input type="text" inputmode="numeric" autocomplete="off" data-time id="gWunschGeht"></div>
             </div>
           </details>
         </div>
@@ -156,7 +156,7 @@
         <div><label>Auftragsnummer</label><input id="taskOrderNr"></div>
         <div><label>Modul</label><input id="taskModul"></div>
         <div><label>Station</label><input id="taskStation"></div>
-        <div><label>Datum Bekanntgabe</label><input type="date" id="taskDatum"></div>
+        <div><label>Datum Bekanntgabe</label><input type="text" inputmode="numeric" maxlength="10" autocomplete="off" data-date id="taskDatum"></div>
       </div>
       <div class="grid cols2" style="margin-top:8px;">
         <div><label>Änderung / Beschreibung</label><input id="taskAenderung"></div>
@@ -196,7 +196,7 @@
       <div class="grid cols3">
         <div><label>Anspruch dieses Jahr (Tage)</label><input type="number" step="0.5" id="uAnspruch"></div>
         <div><label>Übertrag aus Vorjahr (Tage)</label><input type="number" step="0.5" id="uUebertrag"><label class="chk"><input type="checkbox" id="uUebertragAuto"> automatisch aus Vorjahr</label></div>
-        <div><label>Resturlaub aus Vorjahr verfällt am</label><input type="date" id="uVerfall"></div>
+        <div><label>Resturlaub aus Vorjahr verfällt am</label><input type="text" inputmode="numeric" maxlength="10" autocomplete="off" data-date id="uVerfall"></div>
       </div>
       <p class="hint" id="urlaubHint"></p>
     </div>
@@ -251,6 +251,8 @@
       <h2>Allgemein</h2>
       <div class="set-row"><div class="set-label"><strong>Name</strong></div><div class="set-ctl"><input id="sName"></div></div>
       <div class="set-row"><div class="set-label"><strong>Personal-Nummer</strong></div><div class="set-ctl"><input id="sPersNr"></div></div>
+      <div class="set-row"><div class="set-label"><strong>Uhrzeitformat</strong><small>Gilt für alle Zeitfelder, unabhängig von Windows oder Browser. Wird nur in diesem Browser gespeichert.</small></div><div class="set-ctl"><select id="sTimeFormat"><option value="24">24 Stunden (hh:mm)</option><option value="12">12 Stunden (hh:mm AM/PM)</option></select></div></div>
+      <div class="set-row"><div class="set-label"><strong>Datumsformat</strong><small>Gilt für alle Datumsfelder und Anzeigen. In der Datei wird weiter JJJJ-MM-TT gespeichert.</small></div><div class="set-ctl"><select id="sDateFormat"><option value="de">TT.MM.JJJJ</option><option value="iso">JJJJ-MM-TT</option></select></div></div>
       <div class="set-row"><div class="set-label"><strong>Anzeige von Dauern</strong><small>Berechnete Werte werden standardmäßig dezimal angezeigt; Eingaben für Dauern erfolgen immer als H:MM.</small></div><div class="set-ctl"><select id="sDurationFormat"><option value="decimal">Dezimalstunden (z. B. 7,50)</option><option value="hm">Stunden:Minuten (z. B. 7:30)</option></select></div></div>
       <div class="set-row" id="installRow" hidden><div class="set-label"><strong>Als App installieren</strong><small id="installStatus"></small></div><div class="set-ctl"><button id="btnInstallApp" hidden>Als App installieren</button></div></div>
       <div class="set-row" id="updateRow" hidden><div class="set-label"><strong>Programm-Updates</strong><small id="updateVersion">Installierte Version wird ermittelt …</small><small id="updateStatus">Updates werden nur auf deine Anforderung geprüft.</small></div><div class="set-ctl"><button id="btnCheckUpdate" class="secondary">Auf Updates prüfen</button><button id="btnInstallUpdate" hidden>Update installieren</button></div></div>
@@ -283,13 +285,17 @@
     </div>
 
     <div class="panel set-section" data-sec="arbeitszeit">
-      <h2>Pausen &amp; Kernzeit</h2>
-      <div class="set-row stack"><div class="set-label"><strong>Je Tagesgruppe</strong><small>Pausenlänge nur für Tagesgruppen ohne feste Pausen (z. B. Samstag/Sonntag), und Kernzeit für die Geht-Empfehlung „K“.</small></div>
-        <div class="set-ctl"><table class="rules-table" id="rulesTable"></table></div></div>
-      <div class="set-row"><div class="set-label"><strong>Pause an Feiertagen</strong><small>Gilt an Feiertagen anstelle der festen Pausen. Eingabe in Minuten.</small></div><div class="set-ctl unit"><input type="number" min="0" step="1" id="rPauseHoliday" placeholder="30"><span>Min.</span></div></div>
-      <div class="set-row"><div class="set-label"><strong>Spätestes Arbeitsende</strong><small>Begrenzt die 9h-/10h-Zeiten und -Warnungen.</small></div><div class="set-ctl"><input type="time" id="rLatestEnd"></div></div>
-      <div class="set-row stack"><div class="set-label"><strong>Feste Pausen</strong><small>Die Summe dieser Pausen wird von der Arbeitszeit abgezogen – außer am Tag ist eine eigene Pause eingetragen. Zu diesen Zeiten erinnert Stundenzettel außerdem an die Pause.</small></div>
-        <div class="set-ctl" id="rBreaksEditor"></div></div>
+      <h2>Pausen</h2>
+      <p class="hint">Abgezogen werden die Pausenzeiten, in denen du anwesend warst (anteilig bei teilweiser Überschneidung). Zu diesen Zeiten erinnert Stundenzettel an die Pause und pausiert den laufenden Auftrag. Eine eigene Pause in der Monatstabelle (auch 0) überschreibt die Automatik.</p>
+      <div class="pause-cards" id="pauseCards"></div>
+      <p class="hint pause-legal">Gesetzliche Mindestpause (fest): ab 6 h Arbeitszeit netto 30 Min., ab 9 h netto 45 Min.</p>
+    </div>
+
+    <div class="panel set-section" data-sec="arbeitszeit">
+      <h2>Kernzeit &amp; Arbeitsende</h2>
+      <div class="set-row stack"><div class="set-label"><strong>Kernzeit</strong><small>Für die Geht-Empfehlung „K“, je Tagesgruppe.</small></div>
+        <div class="set-ctl"><div class="table-scroll"><table class="rules-table" id="rulesTable"></table></div></div></div>
+      <div class="set-row"><div class="set-label"><strong>Spätestes Arbeitsende</strong><small>Begrenzt die 9h-/10h-Zeiten und -Warnungen.</small></div><div class="set-ctl"><input type="text" inputmode="numeric" autocomplete="off" data-time id="rLatestEnd"></div></div>
     </div>
 
     <div class="panel set-section" data-sec="abwesenheit">
