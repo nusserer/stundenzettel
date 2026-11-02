@@ -1461,10 +1461,19 @@ function todayMetrics(){
   const remaining=time=>time&&kommt ? Math.max(0,timeToMin(time)-timeToMin(nowTimeStr())) : null;
   return {ist:c.ist, kommt, ten, geht, remainingTen:remaining(ten), remainingGeht:remaining(geht)};
 }
+function renderRestHint(){
+  const el=document.getElementById("heuteRest"); if(!el || !state) return;
+  const k=todayKey(), day=state.days[k], started=(day?.stamps||[]).some(Boolean);
+  let text="";
+  if(started){ const r=restInfoFor(k); if(r && r.warn) text="⚠ Ruhezeit nur "+restText(r.gap)+" seit Geht am "+fmtDateDE(r.prevKey)+" um "+minToTime(r.prevEnd)+" (mindestens 11 h)."; }
+  else { const e=earliestKommtToday(); const nowMin=timeToMin(nowTimeStr()); if(e && e.minutes>nowMin) text="Ruhezeit: frühestes Kommt "+minToTime(e.minutes)+" (11 h nach Geht am "+fmtDateDE(e.prevKey)+" um "+e.prevEnd+")."; }
+  el.hidden=!text; el.textContent=text;
+}
 function renderHeute(){
   const k = todayKey();
   document.getElementById("heuteDatum").textContent = fmtDateDE(k)+" · "+WEEKDAY_LABELS[jsWeekdayKey(keyToDate(k))];
   renderHeuteKpis(k);
+  renderRestHint();
 
   const day = ensureDay(k);
   renderStempelList(k, day);
@@ -2103,6 +2112,27 @@ function applyAutoGehtPrediction(){
   markDirty();
 }
 
+/* ---------------- Wochenanzeige (KW-Zelle, Ruhezeit) ---------------- */
+function signedHours(h){ const t=hoursToHM(h); return h>0 && !String(t).startsWith("-") ? "+"+t : t; }
+function weekTooltip(w){
+  const lines=["KW "+w.kw+" (Mo "+fmtDateDE(w.from)+" – So "+fmtDateDE(w.to)+")","IST "+hoursToHM(w.ist)+" h · SOLL "+hoursToHM(w.soll)+" h · +/- "+signedHours(w.diff)+" h"];
+  if(w.ist>WEEK_WARN_HOURS) lines.push("Über "+WEEK_WARN_HOURS+" h in dieser Woche – gesetzliche Grenze beachten (Durchschnitt 8 h je Werktag).");
+  if(w.partialYear) lines.push("Die Woche reicht über den Jahreswechsel; gezählt werden nur Tage dieses Jahres.");
+  lines.push("Klicken: zwischen +/- und IST umschalten");
+  return lines.join("\n");
+}
+function weekCellHtml(w, rows){
+  if(!w) return `<td class="num"></td>`;
+  const mode=weekMode(), value=!w.hasData ? "" : (mode==="ist" ? hoursToHM(w.ist) : signedHours(w.diff));
+  const cls=["num","kw-cell", rows>1?"kw-tall":"", mode==="ist"?"kw-ist":(w.diff>0?"kw-pos":(w.diff<0?"kw-neg":"")), w.ist>WEEK_WARN_HOURS?"kw-over":""].filter(Boolean).join(" ");
+  return `<td class="${cls}" rowspan="${rows}" tabindex="0" role="button" title="${escapeHtml(weekTooltip(w))}" aria-label="KW ${w.kw}, ${mode==="ist"?"IST":"Saldo"} ${escapeHtml(value)} Stunden. Umschalten mit Enter."><span class="kw-no">${w.kw}</span><span class="kw-val">${escapeHtml(value)}</span></td>`;
+}
+function restWarnHtml(k){
+  const r=restInfoFor(k); if(!r || !r.warn) return "";
+  const text="Ruhezeit nur "+restText(r.gap)+" nach Geht am "+fmtDateDE(r.prevKey)+" um "+minToTime(r.prevEnd)+" (gesetzlich mindestens 11 h)";
+  return ` <span class="rest-warn" title="${escapeHtml(text)}" aria-label="${escapeHtml(text)}">⚠</span>`;
+}
+
 function renderMonat(){
   fillMonatSelect();
   if(currentMonthIdx === new Date().getMonth()) applyAutoGehtPrediction();
@@ -2122,6 +2152,8 @@ function renderMonat(){
   tbody.innerHTML="";
   const balances = new Map(monthBalanceSeries(currentMonthIdx).map(p=>[p.date,p.bal]));
   const tk = todayKey();
+  const weeks = buildWeekSummaries(), weekRows = new Map(), weekShown = new Set();
+  keys.forEach(k=>{ const id=weekIdOf(keyToDate(k)); weekRows.set(id,(weekRows.get(id)||0)+1); });
   for(const k of keys){
     const c = calcDay(k);
     const running = balances.get(k);
@@ -2140,10 +2172,10 @@ function renderMonat(){
     const stamps = state.days[k]?.stamps || [];
     const timesHtml = buildTimesCellHTML(k, ensureDay(k));
     tr.innerHTML = `
-      <td class="num">${isoWeekNumber(c.dateObj)}</td>
+      ${(()=>{ const id=weekIdOf(c.dateObj); if(weekShown.has(id)) return ""; weekShown.add(id); return weekCellHtml(weeks.get(id), weekRows.get(id)); })()}
       <td class="num">${pad2(c.dateObj.getDate())}.${pad2(c.dateObj.getMonth()+1)}.</td>
-      <td>${WEEKDAY_LABELS[wk].slice(0,2)}</td>
-      <td>${c.holiday?escapeHtml(c.holiday.label):""}</td>
+      <td>${WEEKDAY_LABELS[wk].slice(0,2)}${restWarnHtml(k)}</td>
+      <td class="hol-cell">${c.holiday?escapeHtml(c.holiday.label):""}</td>
       <td>${timesHtml}</td>
       <td><div class="month-pause"><input inputmode="numeric" data-day="${k}" data-f="pause" aria-label="Pause in Minuten am ${fmtDateDE(k)}; leer = automatisch" title="${escapeHtml(pauseExplanation(c.day, c.dateObj, c.holiday, c.liveNow))}" placeholder="${c.pauseMin}" value="${state.days[k]?.pause!=null && String(state.days[k].pause).trim()!=="" && Number.isFinite(Number(state.days[k].pause)) ? Number(state.days[k].pause) : ""}">${c.warn?'<span class="warnflag" title="Gesetzlich zu kurze Pause" aria-label="Gesetzlich zu kurze Pause">!</span>':""}${c.tenHourStatus==="overflow"?'<span class="warnflag" title="Nettoarbeitszeit über 10 Stunden" aria-label="Nettoarbeitszeit über 10 Stunden">⚠ 10h</span>':""}</div></td>
       <td>${codeSelectHtml(k, state.days[k]?.code||"")}</td>
@@ -2155,6 +2187,11 @@ function renderMonat(){
     `;
     tbody.appendChild(tr);
   }
+  tbody.querySelectorAll(".kw-cell").forEach(td=>{
+    const flip=()=>{ toggleWeekMode(); renderMonat(); };
+    td.addEventListener("click", flip);
+    td.addEventListener("keydown", e=>{ if(e.key==="Enter" || e.key===" "){ e.preventDefault(); flip(); } });
+  });
   tbody.querySelectorAll("input[data-f],select[data-f]").forEach(el=>{
     el.addEventListener("change",(e)=>{
       const dk=e.target.dataset.day, f=e.target.dataset.f, v=e.target.value;
@@ -2352,6 +2389,25 @@ function renderGehtPanel(monthIdx){
   };
 }
 
+/* ---------------- JAHR: alle Kalenderwochen ---------------- */
+function renderJahrWochen(){
+  const table=document.getElementById("jahrWochen"); if(!table) return;
+  const all=[...buildWeekSummaries().values()].filter(w=>w.hasData), {best, worst}=weekExtremes(all);
+  const mode=weekMode();
+  table.querySelector("thead").innerHTML=`<tr><th>KW</th><th>Zeitraum</th><th>IST</th><th>SOLL</th><th>+/-</th><th>Hinweis</th></tr>`;
+  initColResize(table, "jahrWochen");
+  const tb=table.querySelector("tbody"); tb.innerHTML="";
+  for(const w of all){
+    const notes=[]; if(best && w.id===best.id) notes.push("★ höchstes Plus"); if(worst && w.id===worst.id) notes.push("▼ höchstes Minus");
+    if(w.ist>WEEK_WARN_HOURS) notes.push("über "+WEEK_WARN_HOURS+" h"); if(w.partialYear) notes.push("Jahreswechsel");
+    const tr=document.createElement("tr");
+    tr.className=[best&&w.id===best.id?"week-best":"", worst&&w.id===worst.id?"week-worst":"", w.ist>WEEK_WARN_HOURS?"week-over":""].filter(Boolean).join(" ");
+    tr.innerHTML=`<td class="num">${w.kw}</td><td>${fmtDateDE(w.from).slice(0,6)} – ${fmtDateDE(w.to).slice(0,6)}</td>
+      <td class="num${mode==="ist"?" strong":""}">${hoursToHM(w.ist)}</td><td class="num">${hoursToHM(w.soll)}</td><td class="num${mode==="diff"?" strong":""}">${signedHours(w.diff)}</td><td>${notes.join(" · ")}</td>`;
+    tb.appendChild(tr);
+  }
+  document.getElementById("jahrWochenInfo").textContent = all.length ? "" : "Noch keine Wochen mit Eintragungen.";
+}
 /* ---------------- JAHR: Kalenderraster ---------------- */
 function renderJahrKalender(){
   const thead=document.querySelector("#jahrKalender thead");
@@ -2536,6 +2592,7 @@ function renderJahr(){
 }
 function renderJahrBody(){
   renderJahrKalender();
+  renderJahrWochen();
   renderZeitverteilungJahr();
   const kpis=document.getElementById("jahrKpis"); kpis.innerHTML="";
   let ist=0,soll=0;
@@ -2599,6 +2656,67 @@ function monthBalanceSeries(monthIdx){
   const prefix = `${state.settings.year}-${pad2(monthIdx+1)}-`;
   return yearBalanceSeries().filter(p=>p.date.startsWith(prefix));
 }
+/* WEEKS_START */
+/* Kalenderwochen (Mo–So): Summe von IST, SOLL und +/- der Tage dieses Jahres; 48-h-Warnschwelle; gesetzliche Ruhezeit von 11 h. */
+const WEEK_WARN_HOURS = 48, REST_MIN_MINUTES = 11*60, WEEK_MODE_KEY = "stundenzettel-v3-week-mode";
+function isoWeekYear(d){ const t=new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); t.setUTCDate(t.getUTCDate()-((t.getUTCDay()+6)%7)+3); return t.getUTCFullYear(); }
+function weekIdOf(d){ return isoWeekYear(d)+"-"+String(isoWeekNumber(d)).padStart(2,"0"); }
+function weekMode(){ try{ return localStorage.getItem(WEEK_MODE_KEY)==="ist" ? "ist" : "diff"; }catch(e){ return "diff"; } }
+function toggleWeekMode(){ try{ localStorage.setItem(WEEK_MODE_KEY, weekMode()==="ist" ? "diff" : "ist"); }catch(e){} }
+function buildWeekSummaries(){
+  const year=state.settings.year, map=new Map();
+  for(let d=new Date(year,0,1); d.getFullYear()===year; d.setDate(d.getDate()+1)){
+    const k=dateKey(d), id=weekIdOf(d);
+    let w=map.get(id);
+    if(!w){
+      const mon=new Date(d); mon.setDate(mon.getDate()-((mon.getDay()+6)%7)); const sun=new Date(mon); sun.setDate(sun.getDate()+6);
+      w={id, kw:isoWeekNumber(d), from:dateKey(mon), to:dateKey(sun), ist:0, soll:0, diff:0, hasData:false, daysInYear:0, partialYear:false};
+      map.set(id,w);
+    }
+    const c=calcDay(k); w.daysInYear++;
+    w.ist+=c.ist||0; w.soll+=c.soll||0; w.diff+=c.diff||0;
+    if(c.ist!=null || state.days[k]?.code) w.hasData=true;
+  }
+  for(const w of map.values()){ w.ist=round2(w.ist); w.soll=round2(w.soll); w.diff=round2(w.diff); w.partialYear=w.daysInYear<7; }
+  return map;
+}
+/* Höchstes Plus und höchstes Minus unter den Wochen mit Daten (nur wenn es tatsächlich ein Plus bzw. Minus gibt). */
+function weekExtremes(weeks){
+  let best=null, worst=null;
+  for(const w of weeks){ if(!w.hasData) continue; if(w.diff>0 && (!best || w.diff>best.diff)) best=w; if(w.diff<0 && (!worst || w.diff<worst.diff)) worst=w; }
+  return {best, worst};
+}
+/* Ruhezeit zwischen dem letzten „Geht“ des vorigen Arbeitstags und dem ersten „Kommt“ von Tag k. */
+function restInfoFor(k){
+  const st=(state.days[k]?.stamps||[]).filter(Boolean); if(!st.length) return null;
+  const start=timeToMin(st[0]), d=keyToDate(k);
+  for(let i=1;i<=7;i++){
+    const pd=new Date(d); pd.setDate(pd.getDate()-i);
+    if(pd.getFullYear()!==state.settings.year) return null;
+    const pk=dateKey(pd), ps=(state.days[pk]?.stamps||[]).filter(Boolean);
+    if(!ps.length) continue;
+    if(ps.length%2===1) return null;                       // Vortag noch offen: nicht beurteilbar
+    const prevEnd=timeToMin(ps[ps.length-1]), gap=i*1440+start-prevEnd;
+    return {gap, prevKey:pk, prevEnd, warn:gap<REST_MIN_MINUTES};
+  }
+  return null;
+}
+function restText(gapMin){ return Math.floor(gapMin/60)+" h "+String(gapMin%60).padStart(2,"0")+" min"; }
+/* Frühestes erlaubtes Kommt für heute (Minuten seit Mitternacht, kann über 24 h liegen) aus der Ruhezeit nach dem letzten Geht. */
+function earliestKommtToday(){
+  const k=todayKey(), d=keyToDate(k);
+  for(let i=1;i<=7;i++){
+    const pd=new Date(d); pd.setDate(pd.getDate()-i);
+    if(pd.getFullYear()!==state.settings.year) return null;
+    const ps=(state.days[dateKey(pd)]?.stamps||[]).filter(Boolean);
+    if(!ps.length) continue;
+    if(ps.length%2===1) return null;
+    const e=timeToMin(ps[ps.length-1])+REST_MIN_MINUTES-i*1440;
+    return e>0 ? {minutes:e, prevKey:dateKey(pd), prevEnd:ps[ps.length-1]} : null;
+  }
+  return null;
+}
+/* WEEKS_END */
 function drawMonthChart(monthIdx){
   const svg=document.getElementById("monatChart");
   if(!svg) return;

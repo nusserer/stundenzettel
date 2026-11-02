@@ -37,6 +37,7 @@
     <div class="panel">
       <h2>Stempeln</h2>
       <div id="heuteUnchecked" class="unchecked-hint" role="status" hidden></div>
+      <div id="heuteRest" class="rest-hint" role="status" hidden></div>
       <div id="heuteStempelForm"></div>
       <div class="btnrow">
         <button class="go" id="btnKommen">Kommt (jetzt)</button>
@@ -129,6 +130,13 @@
       <h2>Monatsübersicht <small>Auszahlung in Stunden inkl. zusätzlicher Auszahlung · laufender Monat vorläufig</small></h2>
       <div class="tablewrap" style="max-height:none;">
         <table id="jahrTable"><thead></thead><tbody></tbody></table>
+      </div>
+    </div>
+    <div class="panel jahr-wochen">
+      <h2>Kalenderwochen <small>Saldo je Woche (Mo–So) · ★ höchstes Plus · ▼ höchstes Minus · Wochen mit Eintragungen</small></h2>
+      <div class="hint" id="jahrWochenInfo"></div>
+      <div class="tablewrap" style="max-height:420px;">
+        <table id="jahrWochen"><thead></thead><tbody></tbody></table>
       </div>
     </div>
     <div class="panel jahr-zeit" id="zeitverteilungJahr"></div>
@@ -288,7 +296,18 @@
       <h2>Pausen</h2>
       <p class="hint">Abgezogen werden die Pausenzeiten, in denen du anwesend warst (anteilig bei teilweiser Überschneidung). Zu diesen Zeiten erinnert Stundenzettel an die Pause und pausiert den laufenden Auftrag. Eine eigene Pause in der Monatstabelle (auch 0) überschreibt die Automatik.</p>
       <div class="pause-cards" id="pauseCards"></div>
-      <p class="hint pause-legal">Gesetzliche Mindestpause (fest): ab 6 h Arbeitszeit netto 30 Min., ab 9 h netto 45 Min.</p>
+
+    </div>
+
+    <div class="panel set-section" data-sec="arbeitszeit">
+      <h2>Gesetzliche Grenzen <small>Info – fest, nicht einstellbar</small></h2>
+      <ul class="legal-list">
+        <li><strong>Pause:</strong> ab 6 h Arbeitszeit netto mindestens 30 Min., ab 9 h netto mindestens 45 Min. Wird automatisch ergänzt; eine eigene Eingabe überschreibt sie, der Tag wird dann mit ⚠ markiert.</li>
+        <li><strong>Tageshöchstzeit:</strong> höchstens 10 h pro Tag. Die App warnt ab 9,5 h und markiert Tage darüber.</li>
+        <li><strong>Ruhezeit:</strong> mindestens 11 h zwischen Geht und dem nächsten Kommt. Unterschreitungen stehen mit ⚠ am Wochentag in der Monatstabelle, auf „Heute“ steht das früheste erlaubte Kommt.</li>
+        <li><strong>Woche:</strong> Warnung ab 48 h in einer Kalenderwoche (rot in der KW-Zelle). Rechtlich zählt der Durchschnitt von 8 h je Werktag über 6 Monate, die 48 h sind deshalb ein Hinweis und kein Verbot.</li>
+      </ul>
+      <p class="hint">Quelle: Arbeitszeitgesetz (§§ 3, 4, 5). Abweichende tarifliche oder betriebliche Regeln werden nicht berücksichtigt.</p>
     </div>
 
     <div class="panel set-section" data-sec="arbeitszeit">

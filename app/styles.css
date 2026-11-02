@@ -624,7 +624,7 @@
     #monatTable .times-wrap .time-row input[data-time]{width:68px;}
     #monatTable td input.wide{min-width:65px;}
     #monatTable td select{min-width:58px;max-width:85px;}
-    #monatTable td:nth-child(4){white-space:normal;max-width:70px;overflow-wrap:anywhere;}
+    #monatTable td.hol-cell{white-space:normal;max-width:70px;overflow-wrap:anywhere;}
     #monatTable .month-pause input{width:38px;}
     #view-monat .monat-col-side .panel{padding:10px;}
     #view-monat .month-stat span{overflow-wrap:anywhere;}
@@ -658,3 +658,26 @@ table.cols-custom td input,table.cols-custom td select{min-width:0 !important; m
 #view-monat .monat-layout:has(#monatTable.cols-custom){grid-template-columns:minmax(0,2.1fr) minmax(330px,1fr);}
 @media (min-width:1280px) and (max-width:1700px){#view-monat .monat-layout:has(#monatTable.cols-custom){grid-template-columns:minmax(0,1fr) 280px;}}
 @media (max-width:1279px){#view-monat .monat-layout:has(#monatTable.cols-custom){grid-template-columns:1fr;}}
+
+/* Kalenderwochen: verbundene KW-Zelle (Saldo oder IST), Jahresliste, Ruhezeit */
+#monatTable td.kw-cell{background:#ece8da !important; text-align:center; cursor:pointer; vertical-align:middle; padding:1px 3px; line-height:1.15;}
+#monatTable td.kw-cell:hover{background:#e3ddc8 !important;}
+#monatTable td.kw-cell:focus-visible{outline:2px solid var(--amber); outline-offset:-2px;}
+#monatTable td.kw-cell .kw-no{display:block; font-size:11px; color:var(--ink-soft);}
+#monatTable td.kw-cell .kw-val{display:block; font-weight:700; font-size:12px;}
+#monatTable td.kw-cell:not(.kw-tall) .kw-no,#monatTable td.kw-cell:not(.kw-tall) .kw-val{display:inline;}
+#monatTable td.kw-cell:not(.kw-tall) .kw-no::after{content:" ";}
+#monatTable td.kw-pos .kw-val{color:var(--moss);}
+#monatTable td.kw-neg .kw-val{color:var(--rust);}
+#monatTable td.kw-ist .kw-val{color:var(--ink);}
+#monatTable td.kw-over{background:#f3c9c0 !important; box-shadow:inset 0 0 0 2px var(--rust);}
+#monatTable td.kw-over .kw-val::after{content:" ⚠";}
+.rest-warn{color:var(--rust); font-weight:700; cursor:help; margin-left:2px;}
+.rest-hint{margin:6px 0; padding:5px 9px; font-size:12.5px; border:1px solid var(--amber-soft); background:#fff6df; color:#7b4b0b; border-radius:var(--radius);}
+.rest-hint[hidden]{display:none;}
+#jahrWochen td.strong{font-weight:700;}
+#jahrWochen tr.week-best td{background:#e1efd9;}
+#jahrWochen tr.week-worst td{background:#f6dcd6;}
+#jahrWochen tr.week-over td:last-child{color:var(--rust); font-weight:600;}
+.legal-list{margin:6px 0 4px; padding-left:20px; font-size:13px; line-height:1.5;}
+.legal-list li{margin-bottom:4px;}
