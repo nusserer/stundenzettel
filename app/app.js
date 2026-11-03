@@ -2003,14 +2003,8 @@ function getTaskEvaluation(){
   taskEvaluationCache = {source, revision:taskEvaluationRevision, tick, result};
   return result;
 }
-function taskEvaluationNotes(info){
-  if(!info) return "";
-  const labels = [];
-  if(info.clipped) labels.push('<span class="evaluation-note" title="Nur gestempelte Anwesenheit berücksichtigt. Das ursprüngliche Zeitprotokoll bleibt unverändert.">bereinigt</span>');
-  if(info.overlap) labels.push('<span class="evaluation-note warning" title="Protokolle überlappen zeitlich. Welcher Auftrag tatsächlich bearbeitet wurde, ist nicht eindeutig.">Überlappung</span>');
-  if(info.estimated) labels.push('<span class="evaluation-note warning" title="Anteilig auf die Netto-IST-Zeit des Tages begrenzt. Rechnerische Schätzung, keine sicher rekonstruierte Aufteilung.">Schätzung</span>');
-  return labels.join(" ");
-}
+/* Die Marker „bereinigt“, „Überlappung“ und „Schätzung“ werden bewusst nicht mehr angezeigt; die Ursachen meldet die Prüfliste. */
+function taskEvaluationNotes(){ return ""; }
 function timeDistribution(monthIdx){ // monthIdx: 0-11 oder null = ganzes Jahr
   const res={auftrag:0, auftraege:Object.create(null), stoer:Object.create(null), total:0, clipped:false, overlap:false, estimated:false};
   const yearPrefix=String(state.settings.year)+"-";
