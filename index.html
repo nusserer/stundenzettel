@@ -163,8 +163,6 @@
       <h2>Neuer Auftrag</h2>
       <div class="grid cols2">
         <div><label>Auftragsnummer</label><input id="taskOrderNr"></div>
-        <div><label>Modul</label><input id="taskModul"></div>
-        <div><label>Station</label><input id="taskStation"></div>
         <div><label>Datum Bekanntgabe</label><input type="text" inputmode="numeric" maxlength="10" autocomplete="off" data-date id="taskDatum"></div>
       </div>
       <div class="grid cols2" style="margin-top:8px;">
@@ -176,7 +174,7 @@
       <div class="sheet-tabs" id="taskKindTabs" style="margin-bottom:12px;"><div class="sheet-tab active" data-kind="auftrag">Aufträge</div><div class="sheet-tab" data-kind="stoerung">⚡ Störungen</div></div>
       <h2 id="taskListTitle">Auftragsliste</h2>
       <div class="grid cols3" style="margin-bottom:10px;align-items:end;">
-        <div><label>Suche (Nr., Modul, Station, Änderung)</label><input id="taskSearch" placeholder="z. B. Nummer oder Stichwort"></div>
+        <div><label>Suche (Nr., Änderung)</label><input id="taskSearch" placeholder="z. B. Nummer oder Stichwort"></div>
         <div><label>Status</label><select id="taskStatusFilter"><option value="open">Fertige ausblenden</option><option value="all">Alle Aufträge</option><option value="finished">Nur fertige</option></select></div>
         <div><button id="btnNewTaskToggle" type="button">+ Neuer Auftrag</button></div>
       </div>

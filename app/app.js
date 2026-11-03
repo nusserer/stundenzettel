@@ -2727,17 +2727,19 @@ function earliestKommtToday(){
   return null;
 }
 /* WEEKS_END */
+/* Der Saldoverlauf endet heute: Tage in der Zukunft bekommen keine Linie und keine Punkte (die Achse bleibt über den ganzen Zeitraum). */
+function pastChartPoints(pts){ const t=todayKey(); return pts.filter(p=>p.date<=t); }
 function drawMonthChart(monthIdx){
   const svg=document.getElementById("monatChart");
   if(!svg) return;
-  const pts=monthBalanceSeries(monthIdx);
+  const all=monthBalanceSeries(monthIdx), pts=pastChartPoints(all);
   const W=1600,H=420,padL=60,padR=20,padT=20,padB=34;
-  const vals=pts.map(p=>p.bal);
+  const vals=(pts.length?pts:all).map(p=>p.bal);
   const rawMin=Math.min(...vals), rawMax=Math.max(...vals);
   const pad = Math.max((rawMax-rawMin)*0.12, 1); // etwas Luft oben/unten, statt starr bei 0 zu beginnen
   const min = rawMin - pad, max = rawMax + pad;
   const range=(max-min)||1;
-  const x = i => padL + (W-padL-padR)*(i/(pts.length-1||1));
+  const x = i => padL + (W-padL-padR)*(i/(all.length-1||1));
   const y = v => padT + (H-padT-padB)*(1-(v-min)/range);
   let path="", dots="";
   pts.forEach((p,i)=>{
@@ -2750,7 +2752,7 @@ function drawMonthChart(monthIdx){
     <text x="${padL}" y="${(y(0)-6).toFixed(1)}" font-size="13" fill="#565f68" font-family="var(--mono)">0</text>` : "";
   // Tages-Nummern als X-Achsenbeschriftung, wie im Original
   let dayLabels = "";
-  pts.forEach((p,i)=>{
+  all.forEach((p,i)=>{
     dayLabels += `<text x="${x(i).toFixed(1)}" y="${H-10}" font-size="13" fill="#565f68" text-anchor="middle">${i+1}</text>`;
   });
   svg.innerHTML = `
@@ -2764,14 +2766,14 @@ function drawMonthChart(monthIdx){
 }
 function drawYearChart(){
   const svg=document.getElementById("jahrChart");
-  const pts=yearBalanceSeries();
+  const all=yearBalanceSeries(), pts=pastChartPoints(all);
   const W=1080,H=290,padL=44,padR=14,padT=14,padB=50;
-  const vals=pts.map(p=>p.bal);
+  const vals=(pts.length?pts:all).map(p=>p.bal);
   const rawMin=Math.min(...vals), rawMax=Math.max(...vals);
   const pad = Math.max((rawMax-rawMin)*0.12, 1);
   const min = rawMin-pad, max = rawMax+pad;
   const range=(max-min)||1;
-  const x = i => padL + (W-padL-padR)*(i/(pts.length-1||1));
+  const x = i => padL + (W-padL-padR)*(i/(all.length-1||1));
   const y = v => padT + (H-padT-padB)*(1-(v-min)/range);
   let path="";
   pts.forEach((p,i)=>{ path += (i===0?"M":"L")+x(i).toFixed(1)+","+y(p.bal).toFixed(1)+" "; });
@@ -2859,8 +2861,6 @@ const TASK_COLS = [
   {key:"", label:"", sortable:false},
   {key:"pinned", label:"Angeheftet"},
   {key:"orderNr", label:"Auftragsnr."},
-  {key:"modul", label:"Modul"},
-  {key:"station", label:"Station"},
   {key:"aenderung", label:"Änderung"},
   {key:"status", label:"Status"},
   {key:"datum", label:"Angelegt am"},
@@ -2890,7 +2890,7 @@ function renderRunningTask(){
     box.className="panel running-panel"+(isSt?" stoer":"");
     box.innerHTML=`<h2>${isSt?"Aktuelle Störung":"Aktueller Auftrag"} <span class="badge ${isSt?"stoer":"on"}">${isSt?"Störung":"in Arbeit"}</span></h2>
       <div class="run-main"><div class="run-nr">${escapeHtml(t.orderNr||"(ohne Nr.)")}</div>
-      <div class="run-meta">${isSt?(interrupted?"unterbricht Auftrag "+escapeHtml(interrupted.orderNr||"(ohne Nr.)"):"&nbsp;"):([t.modul,t.station,t.aenderung].filter(Boolean).map(escapeHtml).join(" · ")||"&nbsp;")}</div></div>
+      <div class="run-meta">${isSt?(interrupted?"unterbricht Auftrag "+escapeHtml(interrupted.orderNr||"(ohne Nr.)"):"&nbsp;"):([t.aenderung].filter(Boolean).map(escapeHtml).join(" · ")||"&nbsp;")}</div></div>
       <div class="run-time"><span class="hint">Gesamt (ausgewertet)</span> <strong>${fmtDurMin(totalTaskMinutes(t.id))}</strong> <span class="hint">· seit Start ${live} Min.</span>${taskEvaluationNotes(evaluation.byTask[t.id])}</div>
       <div class="run-actions">${isSt?`<button data-run="stop" data-id="${t.id}" class="run-btn">⏹ Störung beenden</button>`:`<button data-run="stop" data-id="${t.id}" class="run-btn">⏸ Pause</button><button data-run="fertig" data-id="${t.id}" class="secondary fertig-btn run-btn">✔ Fertig</button>`}<button data-run="edit" data-id="${t.id}" class="secondary run-btn">Bearbeiten</button></div>`;
   }
@@ -2904,7 +2904,7 @@ function renderRunningTask(){
     }
     else if(act==="edit"){
       const task=state.tasks.find(x=>x.id===id);
-      ["orderNr","modul","station","aenderung"].forEach(field=>{ const value=prompt(`${field}:`,task[field]||""); if(value!==null) updateTaskMetadata(task,field,value); });
+      [["orderNr","Auftragsnummer"],["aenderung","Änderung / Beschreibung"]].forEach(([field,label])=>{ const value=prompt(`${label}:`,task[field]||""); if(value!==null) updateTaskMetadata(task,field,value); });
     } else if(act==="fertig"){
       const task=state.tasks.find(x=>x.id===id);
       if(!confirm(`Auftrag „${(task&&task.orderNr)||"(ohne Nr.)"}" als fertig markieren?`)) return;
@@ -2928,7 +2928,9 @@ function renderAuftraege(){
   document.getElementById("taskDatum").value = todayKey();
   const thead=document.querySelector("#taskTable thead");
   const tbody=document.querySelector("#taskTable tbody");
-  const widths = isStoer ? state.ui.stoerTableColumnWidths : state.ui.taskTableColumnWidths;
+  const storedWidths = isStoer ? state.ui.stoerTableColumnWidths : state.ui.taskTableColumnWidths;
+  // Modul und Station sind keine Spalten mehr; die gespeicherte Breitenliste bleibt unverändert und wird nur ohne diese zwei Einträge verwendet.
+  const widths = (!isStoer && storedWidths.length===11) ? storedWidths.filter((_,i)=>i!==3 && i!==4) : storedWidths;
   applyTableColumnWidths(document.getElementById("taskTable"), widths);
   thead.innerHTML = "<tr>" + (isStoer?STOER_COLS:TASK_COLS).map(c=>{
     if(c.sortable===false) return `<th></th>`;
@@ -2990,8 +2992,6 @@ function renderAuftraege(){
       <td>${canStart?`<button data-act="start" data-id="${t.id}" ${anyActive&&t.status!=="Pause"?"":""}>▶</button>`:`<button data-act="stop" data-id="${t.id}">⏸</button>`}</td>
       <td style="text-align:center"><button class="secondary pin-task ${t.pinned?"is-pinned":""}" data-act="pin" data-id="${t.id}" title="${t.pinned?"Anheftung lösen":"Auftrag anheften"}">${t.pinned?"📌":"📍"}</button></td>
       <td><input class="task-inline" data-task-id="${t.id}" data-task-field="orderNr" value="${escapeHtml(t.orderNr||"")}"></td>
-      <td><input class="task-inline" data-task-id="${t.id}" data-task-field="modul" value="${escapeHtml(t.modul||"")}"></td>
-      <td><input class="task-inline" data-task-id="${t.id}" data-task-field="station" value="${escapeHtml(t.station||"")}"></td>
       <td><input class="task-inline" data-task-id="${t.id}" data-task-field="aenderung" value="${escapeHtml(t.aenderung||"")}"></td>
       <td><select class="task-inline" data-task-id="${t.id}" data-task-field="status"><option ${t.status==='warten'?'selected':''}>warten</option><option ${t.status==='in Arbeit'?'selected':''}>in Arbeit</option><option ${t.status==='Pause'?'selected':''}>Pause</option><option ${t.status==='fertig'?'selected':''}>fertig</option></select></td>
       <td class="num">${t.datum ? fmtDateDE(t.datum) : "–"}</td>
@@ -3138,8 +3138,8 @@ function addTaskFromForm(startNow){
   const t = {
     id: nextTaskId(),
     orderNr: document.getElementById("taskOrderNr").value,
-    modul: document.getElementById("taskModul").value,
-    station: document.getElementById("taskStation").value,
+    modul: "",
+    station: "",
     datum: document.getElementById("taskDatum").value,
     aenderung: document.getElementById("taskAenderung").value,
     kind: "auftrag",
@@ -3149,7 +3149,7 @@ function addTaskFromForm(startNow){
     manualDurationOffsetMinutes: 0,
   };
   state.tasks.push(t);
-  ["taskOrderNr","taskModul","taskStation","taskAenderung"].forEach(id=>document.getElementById(id).value="");
+  ["taskOrderNr","taskAenderung"].forEach(id=>document.getElementById(id).value="");
   if(startNow) taskStart(t.id);
   setNewTaskOpen(false);
   markDirty(); renderAuftraege(); renderHeuteAuftrag();

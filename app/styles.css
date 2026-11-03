@@ -398,7 +398,7 @@
   #taskTable .resize-task-column:hover,#logTable .resize-task-column:hover,#feiertageTable .resize-task-column:hover{background:var(--amber-soft);}
   #taskTable input.task-inline{min-width:72px; width:100%;}
   #feiertageTable input{min-width:0; width:100%;}
-  #logTable input[type="datetime-local"]{min-width:175px;}
+  #logTable input[data-datetime]{min-width:170px;}
   .modal-box p{font-size:13.5px; color:var(--ink-soft); line-height:1.55; margin:0 0 14px;}
   .modal-box .btnrow{display:flex; gap:8px; flex-wrap:wrap;}
 
@@ -702,3 +702,8 @@ button.linklike{background:none; border:none; padding:0; color:#7b4b0b; text-dec
 /* Kalenderwochen: Liste scrollt im Rahmen, statt über die Nachbarbereiche zu ragen */
 #view-jahr .jahr-wochen .tablewrap{overflow:auto; max-height:420px;}
 .jahr-wochen{min-width:0;}
+
+/* Zeit-Log: Felder füllen die Spalte, damit Uhrzeit und Beschreibung nicht abgeschnitten werden */
+#logTable td input{width:100%; min-width:0; box-sizing:border-box;}
+#logTable td input[data-datetime]{min-width:170px; text-overflow:clip;}
+#logTable td input[data-log-field="aenderung"]{text-align:left; text-overflow:ellipsis;}
