@@ -19,6 +19,30 @@
       get length() { return entries.length; },
       peek() { return entries.length ? clone(entries[entries.length - 1]) : null; },
       clear() { entries.length = 0; },
+      recordBatch(entry) {
+        const items = entry.items.filter(item => JSON.stringify(item.before) !== JSON.stringify(item.after));
+        if (!items.length) return false;
+        entries.push(clone({ ...entry, items, batch: true }));
+        while (entries.length > limit) entries.shift();
+        return true;
+      },
+      undoBatch(resolve) {
+        const entry = entries[entries.length - 1];
+        if (!entry || !entry.batch) return { ok: false, reason: 'empty' };
+        const resolved = entry.items.map(item => ({ item, target: resolve(item) }));
+        if (resolved.some(x => !x.target)) return { ok: false, reason: 'unavailable' };
+        if (resolved.some(x => JSON.stringify(capture(x.target, Object.keys(x.item.after))) !== JSON.stringify(x.item.after))) {
+          return { ok: false, reason: 'changed' };
+        }
+        for (const { item, target } of resolved) {
+          for (const [field, old] of Object.entries(item.before)) {
+            if (old.exists) target[field] = clone(old.value);
+            else delete target[field];
+          }
+        }
+        entries.pop();
+        return { ok: true, entry: clone(entry) };
+      },
       record(entry) {
         if (JSON.stringify(entry.before) === JSON.stringify(entry.after)) return false;
         entries.push(clone(entry));
